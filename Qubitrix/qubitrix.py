@@ -2,7 +2,7 @@ import pygame
 import sys
 import random
 import math
-from copy import deepcopy # wtf python why can't I just make a simple copy of a dict
+from copy import deepcopy # because I can't just make a simple copy of a dict
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
@@ -1040,3 +1040,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
