@@ -15,5 +15,7 @@ Holding Shift or L1 with the horizontal movement or rotation buttons will rotate
 
 Semicolon (;), Triangle or L2 - hold the current piece
 
-Esc or touch pad click - pause/unpause the game
+Esc or touch pad click - pause/unpause the game, quit game on pause menu alongside Shift/L1
+
+On the Game Over screen, holding Shift/L1 will show the final grid, which you can still rotate your view of.
 
