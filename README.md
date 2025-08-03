@@ -5,14 +5,15 @@ Note: The only controller supported at the moment is the PlayStation 4 controlle
 
 Controls:
 
-WASD, D-pad or left analog stick - move the piece horizontally
+WASD, D-pad or left analog stick - move the piece horizontally, select level
 
 K/L, Square/Circle or right analog stick - rotate the view of the grid
 
-Space, Cross or R1 - lower the piece
+Space, Cross or R1 - lower the piece, start game
 
 Holding Shift or L1 with the horizontal movement or rotation buttons will rotate the piece in any of 6 directions.
 
 Semicolon (;), Triangle or L2 - hold the current piece
 
-Esc or touch pad click - pause the game
+Esc or touch pad click - pause/unpause the game
+
