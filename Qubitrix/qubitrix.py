@@ -27,8 +27,8 @@ COLORS = [(0, 0, 0), (200, 40, 20), (220, 120, 40), (220, 240, 60), (60, 220, 40
 NEXT_PIECE_COUNT = 5
 Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55
 ALPHA_KEY_COLOR = (1, 1, 1) # transparent ghost (laggy, unused at the moment)
-BACKGROUND_COLORS = [(0, 0, 0), (80, 48, 44), (84, 64, 48), (84, 88, 52), (52, 84, 48), (44, 76, 84), (48, 56, 88), (60, 48, 84), (76, 44, 88), (56, 60, 64)]
-UI_COLORS = [(0, 0, 0), (44, 24, 8), (40, 8, 4), (12, 44, 8), (44, 48, 12), (8, 16, 48), (4, 36, 44), (36, 4, 48), (20, 8, 44), (16, 20, 24)]
+BACKGROUND_COLORS = [tuple(COLORS[n][m]*0.35+40 for m in range(3)) for n in range(10)]
+UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # swap nearby colors
 CUBE_VERTEX_OFFSET = 0.46 # the size of the cube divided by 2
 GHOST_BORDER_WIDTH = int(WINDOW_HEIGHT/360)
 RENDER_CUBES = True
@@ -1015,7 +1015,7 @@ def main():
                 draw_next_pieces(screen, game)
                 draw_ghost_display(screen, game)
             case "Paused":
-                draw_game_ui(screen, game, font_small, font_large)
+                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
                 draw_pause_ui(screen, font_small)
             case "Finished":
                 draw_game_ui(screen, game, font_small, font_large, ui_color_id)
@@ -1034,4 +1034,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
