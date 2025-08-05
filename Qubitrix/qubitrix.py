@@ -285,7 +285,7 @@ class Game:
             if self.key_hold_times[n] > 0:
                 self.key_hold_times[n] += 1
             if self.key_hold_times[n] >= self.repeat_input_times[n]+self.repeat_input_delay:
-                self.key_hold_times[n] -= self.repeat_input_times[n]
+                self.key_hold_times[n] = int(self.key_hold_times[n] - self.repeat_input_times[n])
                 if not self.rotate_modifier:
                     self.basic_input(n, repeat=True)
                 elif n != 6: # excludes holding down hard drop
@@ -988,7 +988,7 @@ def main():
             ui_color_id = min(math.ceil(game.initial_level/4), 9)
         else:
             ui_color_id = min(math.ceil(game.level/4), 9)
-        screen.fill(BACKGROUND_COLORS[ui_color_id])
+        screen.fill(tuple(int(c) for c in BACKGROUND_COLORS[ui_color_id]))
 
         if controller_connected:
             controller_input_check(controller, controller_button_states, controller_analog_states, game)
