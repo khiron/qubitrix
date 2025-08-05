@@ -5,6 +5,7 @@ import math
 from copy import deepcopy # because I can't just make a simple copy of a dict
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
+from Qubitrix.fonts import get_large_font, get_small_font
 from Qubitrix.sounds import Effects
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
@@ -970,8 +971,8 @@ def main():
     pygame.display.set_caption("Qubitrix")
     clock = pygame.time.Clock()
     pygame.font.init()
-    font_small = pygame.font.Font('qubitrix-font.ttf', int(WINDOW_HEIGHT/24))
-    font_large = pygame.font.Font('qubitrix-font.ttf', int(WINDOW_HEIGHT/12))
+    font_small = get_small_font(WINDOW_HEIGHT)
+    font_large = get_large_font(WINDOW_HEIGHT)
     pygame.mixer.init()
     pygame.joystick.init()
     controller_connected = pygame.joystick.get_count() > 0
