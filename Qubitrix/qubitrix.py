@@ -5,6 +5,8 @@ import math
 from copy import deepcopy # because I can't just make a simple copy of a dict
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
+from Qubitrix.sounds import Effects
+
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 ASPECT_RATIO = WINDOW_WIDTH/WINDOW_HEIGHT
 FPS = 60
@@ -70,24 +72,15 @@ class Game:
         self.visual_grid_rotation = 0.0
         self.game_over_screen_time = 0
     def init_sounds(self):
-        self.sound_move_piece = pygame.mixer.Sound("move_piece.wav")
-        self.sound_move_piece_gold = pygame.mixer.Sound("move_piece_gold.wav")
-        self.sound_rotate_piece = pygame.mixer.Sound("rotate_piece.wav")
-        self.sound_rotate_piece_gold = pygame.mixer.Sound("rotate_piece_gold.wav")
-        self.sound_rotation_blocked = pygame.mixer.Sound("rotation_blocked.wav")
-        self.sound_lower_piece = pygame.mixer.Sound("lower_piece.wav")
-        self.sound_place_soft = pygame.mixer.Sound("place_soft.wav")
-        self.sound_place_hard = pygame.mixer.Sound("place_hard.wav")
-        self.sound_sonic_drop = pygame.mixer.Sound("sonic_drop.wav")
-        self.sound_piece_spin = pygame.mixer.Sound("piece_spin.wav")
-        self.sound_hold_piece = pygame.mixer.Sound("hold_piece.wav")
-        self.sound_1_plane_clear = pygame.mixer.Sound('1_plane_clear.wav')
-        self.sound_2_plane_clear = pygame.mixer.Sound('2_plane_clear.wav')
-        self.sound_3_plane_clear = pygame.mixer.Sound('3_plane_clear.wav')
-        self.sound_4_plane_clear = pygame.mixer.Sound('4_plane_clear.wav')
-        self.sound_1_spin_clear = pygame.mixer.Sound('1_spin_clear.wav')
-        self.sound_2_spin_clear = pygame.mixer.Sound('2_spin_clear.wav')
-        self.sound_3_spin_clear = pygame.mixer.Sound('3_spin_clear.wav')
+        Effects().load_all_sounds() # preload all wav files into the Effects manager
+        # wav files loaded but not used 
+        # '1_plane_clear.wav'
+        # '2_plane_clear.wav'
+        # '3_plane_clear.wav'
+        # '4_plane_clear.wav'
+        # '1_spin_clear.wav'
+        # '2_spin_clear.wav'
+        # '3_spin_clear.wav'
     def change_initial_level(self, amount):
         self.initial_level += amount
         if self.initial_level < 1:
@@ -157,7 +150,7 @@ class Game:
             self.lowest_spin_elevation = self.current_piece["centers"][0][2]
             self.piece_spin_on_last_movement = False
             self.get_ghost_piece()
-            pygame.mixer.Sound.play(self.sound_hold_piece, maxtime=300)
+            Effects().hold_piece.play(maxtime=300) # play the sound effect for holding the piece
     def clear_planes(self):
         planes_cleared = 0
         for z in range(HEIGHT):
@@ -259,7 +252,7 @@ class Game:
             if self.tick_time < 0:
                 self.tick_time = 0
         if manual:
-            pygame.mixer.Sound.play(self.sound_lower_piece, maxtime=100)
+            Effects().lower_piece.play(maxtime=100) # play the sound effect for manually lowering the piece
         self.check_piece_elevation()
     def place_piece(self, hard=False):
         planes_cleared = 0
@@ -283,9 +276,9 @@ class Game:
         self.get_new_piece()
         self.refresh_tickspeed()
         if hard:
-            pygame.mixer.Sound.play(self.sound_place_hard, maxtime=300)
+            Effects().sonic_drop.play(maxtime=300) # play the sound effect for hard dropping the piece
         else:
-            pygame.mixer.Sound.play(self.sound_place_soft, maxtime=200)
+            Effects().place_soft.play(maxtime=200) 
     def tick(self):
         for n in range(len(self.key_hold_times)):
             if self.key_hold_times[n] > 0:
@@ -372,9 +365,9 @@ class Game:
             piece["centers"][n][1] += y # move the rotation center
         self.get_ghost_piece()
         if self.piece_fully_grounded(self.ghost_piece):
-            pygame.mixer.Sound.play(self.sound_move_piece_gold, maxtime=300)
+            Effects().move_piece_gold.play(maxtime=300) # play the sound effect for moving the piece if it is fully grounded
         else:
-            pygame.mixer.Sound.play(self.sound_move_piece, maxtime=200)
+            Effects().move_piece.play(maxtime=200) # play the sound effect for moving the piece
         return True
     def force_move_piece(self, piece, x, y, z): # absolute positioning, no collision checking 
         for n in range(len(piece["cubes"])):
@@ -425,7 +418,7 @@ class Game:
             self.increase_score(20+10*final_spin_displacement)
             self.score_mult_bonus(0.14+0.07*final_spin_displacement)
             self.piece_spin_on_last_movement = True
-            pygame.mixer.Sound.play(self.sound_piece_spin, maxtime=300)
+            Effects().piece_spin.play(maxtime=300) # play the sound effect for spinning the piece
             self.total_spins += 1
     def get_ghost_piece(self):
         self.ghost_piece = deepcopy(self.current_piece)
@@ -520,9 +513,9 @@ while True:
                         rotation_success = True
                         self.get_ghost_piece()
                         if self.piece_fully_grounded(self.ghost_piece):
-                            pygame.mixer.Sound.play(self.sound_rotate_piece_gold, maxtime=300)
+                            Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
                         else:
-                            pygame.mixer.Sound.play(self.sound_rotate_piece, maxtime=200)
+                            Effects().rotate_piece.play(maxtime=200)
                         return
                     elif upwards_special_case == 1:
                         cube_placements_found = 0
@@ -538,9 +531,9 @@ while True:
                             rotation_success = True
                             self.get_ghost_piece()
                             if self.piece_fully_grounded(self.ghost_piece):
-                                pygame.mixer.Sound.play(self.sound_rotate_piece_gold, maxtime=300)
+                                Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
                             else:
-                                pygame.mixer.Sound.play(self.sound_rotate_piece, maxtime=200)
+                                Effects().rotate_piece.play(maxtime=200)
                             return
         if not rotation_success: # if the piece needs to be moved (to do: this rotation_success variable does nothing. maybe remove/rework it?)
             horizontal_displacements = []
@@ -571,11 +564,11 @@ while True:
                                 rotation_success = True
                                 self.get_ghost_piece()
                                 if self.piece_fully_grounded(self.ghost_piece):
-                                    pygame.mixer.Sound.play(self.sound_rotate_piece_gold, maxtime=300)
+                                    Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
                                 else:
-                                    pygame.mixer.Sound.play(self.sound_rotate_piece, maxtime=200)
+                                    Effects().rotate_piece.play(maxtime=200) # play the sound effect for rotating the piece
                                 return
-        pygame.mixer.Sound.play(self.sound_rotation_blocked, maxtime=400) # return statement cancels this
+        Effects().rotation_blocked.play(maxtime=400) # return statement cancels this
     def basic_input(self, input, repeat=False):
         match input:
             case 0: # right
@@ -627,7 +620,7 @@ while True:
                 if not self.piece_grounded(self.current_piece):
                     self.drop_piece()
                     self.in_hard_drop = True
-                    pygame.mixer.Sound.play(self.sound_sonic_drop, maxtime=300)
+                    Effects().sonic_drop.play(maxtime=300) # play the sound effect for hard dropping the piece
                 else:
                     self.place_piece(hard=True)
         self.key_hold_times[input] = 1
