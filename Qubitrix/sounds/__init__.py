@@ -94,11 +94,11 @@ class Effects:
         return cls._instance
     
     def __init__(self):
-        if hasattr(self, 'sounds'):
-            return # If sounds attribute already exists, we have already initialized this instance, so we return early
+        if 'sounds' in self.__dict__:
+            return  # Already initialized
         self.sounds = {}
-        self.sounds_dir = os.path.dirname(__file__)  # Get the directory of this file
-    
+        self.sounds_dir = os.path.dirname(__file__)
+
     def load_all_sounds(self):
         """
         Loads all .wav files in the directory into the cache.
