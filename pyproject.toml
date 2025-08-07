@@ -11,8 +11,8 @@
 [project]
 name = "qubitrix"
 version = "0.1.0"
-description = "3D Tetris-like game"
-authors = [{ name="Fred Macavoy", email="your@email.com" }]
+description = "3D falling block game"
+authors = [{ name="Frederick McEvoy", email="FreddieM2048@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
