@@ -19,9 +19,17 @@ dependencies = [
     "pygame"
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "coverage"
+]
+
 [project.scripts]
 Qubitrix = "Qubitrix.qubitrix:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
