@@ -122,7 +122,7 @@ class Effects:
         raise AttributeError(f"No sound effect named '{name}' found.")
 
 
-    def __getitem__(self, key):  # Allows access to sound effects by name eg: Effects["my_named_effect"].play()
+    def __getitem__(self, key):  # Allows access to sound effects by name eg: Effects["my_named_effect"].play() - this has to be used with file names that start with a number.
         return self._load_sound(key) if key not in self.sounds else self.sounds[key] # lazy load the sound if it is not already loaded
     
     def __getattr__(self, name): # Allows access to sound effects as attributes eg: Effects.my_named_effect.play()
