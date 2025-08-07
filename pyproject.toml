@@ -1,0 +1,27 @@
+# This is a pyproject.toml file.
+# TOML stands for "Tom's Obvious, Minimal Language" and is a simple configuration file format.
+# In Python projects, pyproject.toml is used to define project metadata, dependencies, and build system requirements.
+# It is now the standard way to specify how Python projects are built, installed, and what they depend on.
+# This makes it easier to share, install, and manage your project using modern Python tools.
+# specifically for this project it should make it easy to install all the depndencies so we're not 
+# limited to using anaconda.
+# Any folder in the pyproject.toml's folder containing an __init__.py file becomes a module with 
+# the name of the folder.  You can install this module using pip.
+
+[project]
+name = "qubitrix"
+version = "0.1.0"
+description = "3D Tetris-like game"
+authors = [{ name="Fred Macavoy", email="your@email.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pygame"
+]
+
+[project.scripts]
+Qubitrix = "Qubitrix.qubitrix:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
