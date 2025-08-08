@@ -3,7 +3,6 @@ A 3D falling block puzzle game primarily inspired by Tetris.
 
 Note: The only controller supported at the moment is the PlayStation 4 controller (as it is the only one I have been able to test so far). Using other controllers may yield unexpected results.
 
-
 You can install this game using pip:
 ```bash
 pip install qubitrix
@@ -16,7 +15,7 @@ uv pip install qubitrix
 
 ## Developers: 
 
-For developers you can install it in editable mode so as you change the soruce the changes are reflected immediately without needing to reinstall the package:
+Developers may install Qubitrix in editable mode as follows, so as you change the source, the changes are reflected immediately without needing to reinstall the package:
 
 ```bash
 pip install -e .
@@ -34,6 +33,7 @@ To run the tests you can use the `pytest` command from the command line:
 ```bash
 pytest
 ```
+
 ## Coverage analysis:
 
 To see which parts of the code are covered by tests and which are not, you need to run a coverage analysis.  
@@ -51,7 +51,7 @@ To run tests with coverage, you can use the `--cov` option. This will generate a
 pytest --cov=Qubitrix --cov-report=html
 ```
 
-## Game play Controls:
+## Gameplay Controls:
 
 WASD, D-pad or left analog stick - move the piece horizontally, select level
 
