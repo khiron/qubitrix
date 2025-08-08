@@ -19,6 +19,13 @@ dependencies = [
     "pygame"
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "coverage"
+]
+
 [project.scripts]
 Qubitrix = "Qubitrix.qubitrix:main"
 
