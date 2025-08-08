@@ -3,6 +3,7 @@ A 3D falling block puzzle game primarily inspired by Tetris.
 
 Note: The only controller supported at the moment is the PlayStation 4 controller (as it is the only one I have been able to test so far). Using other controllers may yield unexpected results.
 
+
 You can install this game using pip:
 ```bash
 pip install qubitrix
@@ -65,4 +66,3 @@ Semicolon (;), Triangle or L2 - hold the current piece
 Esc or touch pad click - pause/unpause the game, quit game on pause menu alongside Shift/L1
 
 On the Game Over screen, holding Shift/L1 will show the final grid, which you can still rotate your view of.
-

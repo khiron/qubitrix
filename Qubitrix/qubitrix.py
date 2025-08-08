@@ -5,8 +5,8 @@ import math
 from copy import deepcopy # because I can't just make a simple copy of a dict
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
-from Qubitrix.fonts import get_large_font, get_small_font
-from Qubitrix.sounds import Effects
+from fonts import get_large_font, get_small_font
+from sounds import Effects
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 ASPECT_RATIO = WINDOW_WIDTH/WINDOW_HEIGHT
@@ -171,12 +171,12 @@ class Game:
         self.plane_clear_level_progress += planes_cleared
         self.check_for_level_increase()
         self.score_mult_bonus((0, 0.15, 0.32, 0.5, 0.7)[min(planes_cleared, 4)] * (2 if self.piece_spin_on_last_movement else 1))
-        if planes_cleared > 0:
+        if (planes_cleared > 0) and (type(planes_cleared) == int): # ensure that only integers may be used in the eval() functions
             if not self.piece_spin_on_last_movement:
-                eval(f"pygame.mixer.Sound.play(self.sound_{min(planes_cleared, 4)}_plane_clear, maxtime=1000)")
+                eval(f"Effects()['{min(planes_cleared, 4)}_plane_clear'].play(maxtime=1000)")
                 self.total_plane_clear_types[min(planes_cleared, 4)-1] += 1
             else:
-                eval(f"pygame.mixer.Sound.play(self.sound_{min(planes_cleared, 3)}_spin_clear, maxtime=1000)")
+                eval(f"Effects()['{min(planes_cleared, 3)}_spin_clear'].play(maxtime=1000)")
                 self.total_spin_clear_types[min(planes_cleared, 3)-1] += 1
         return planes_cleared
     def get_secluded_spaces(self):
@@ -277,7 +277,7 @@ class Game:
         self.get_new_piece()
         self.refresh_tickspeed()
         if hard:
-            Effects().sonic_drop.play(maxtime=300) # play the sound effect for hard dropping the piece
+            Effects().place_hard.play(maxtime=300) # play the sound effect for hard dropping the piece
         else:
             Effects().place_soft.play(maxtime=200) 
     def tick(self):
