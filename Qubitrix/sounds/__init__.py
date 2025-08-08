@@ -46,6 +46,8 @@ class Effect:
                 maxtime (Optional): Maximum time in milliseconds to play the sound. Default is 100ms.
                 fade_ms (Optional): Fade in/out time in milliseconds. Default is 0ms.
         """
+        if not mixer.get_init():
+            mixer.init()
         self.name = sound_file.split('/')[-1].split('.')[0] # Extract name from file path
         self.sound = mixer.Sound(sound_file)
         self.loops = loops
