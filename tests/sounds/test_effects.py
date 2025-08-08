@@ -7,10 +7,7 @@ def test_singleton():
     assert e1 is e2
 
 def test_lazy_loading():
-    import pygame
-    pygame.mixer.init()
-    
     effects = Effects()
-    # This assumes you have a sound file named "sonic_drop.wav" in the sounds folder
+    # This assumes you have a sound file named "sonic_drop.wav" in the sounds folder - this may fail currently due to the effect's name giving the entire file path from the drive
     effect = effects._load_sound("sonic_drop")
     assert effect.name == "sonic_drop"
