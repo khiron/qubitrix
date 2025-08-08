@@ -3,8 +3,6 @@ A 3D falling block puzzle game primarily inspired by Tetris.
 
 Note: The only controller supported at the moment is the PlayStation 4 controller (as it is the only one I have been able to test so far). Using other controllers may yield unexpected results.
 
-This needs to be run through Anaconda, otherwise files from the parent directory won't be accessible. (I have no idea why this happens!) The modules used are pygame (as well as pygame.locals), sys, random, math, and copy.
-
 Controls:
 
 WASD, D-pad or left analog stick - move the piece horizontally, select level
