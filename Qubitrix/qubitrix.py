@@ -2,11 +2,13 @@ import pygame
 import sys
 import random
 import math
-from copy import deepcopy # because I can't just make a simple copy of a dict
+from copy import deepcopy
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
 from fonts import get_large_font, get_small_font
 from sounds import Effects
+from controllers.abstract_controller import AbstractController
+from controllers.keyboard_controller import KeyboardController # These give "missing import" warnings in VSCode, but still work for some reason. Any explanation?
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 ASPECT_RATIO = WINDOW_WIDTH/WINDOW_HEIGHT
@@ -982,6 +984,7 @@ def main():
         controller_button_states = [False for _ in range(len(controller_bindings))]
         controller_analog_states = [False for _ in range(9)] # note that indexes 6 and 7 are unused
     game = Game()
+    kb_controller = KeyboardController()
 
     while True:
         if game.mode == "Home":
@@ -993,12 +996,14 @@ def main():
         if controller_connected:
             controller_input_check(controller, controller_button_states, controller_analog_states, game)
 
+        # kb_controller.process_events() # This prevents Pygame from fetching any other keyboard inputs, so it is disabled for the time being.
+
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 sys.exit()
-            keyboard_input_check(event, game)
-                        
+            keyboard_input_check(event, game) # soon to be deprecated
+        
         match game.mode:
             case "Playing":
                 game.tick()
