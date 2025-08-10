@@ -48,7 +48,7 @@ class Effect:
         """
         if not mixer.get_init():
             mixer.init()
-        self.name = sound_file.replace('\\','/').split('/')[-1].split('.')[0] # Extract name from file path
+        self.name = os.path.basename(sound_file).split('.')[0] # Extract name from file path
         self.sound = mixer.Sound(sound_file)
         self.loops = loops
         self.maxtime = maxtime

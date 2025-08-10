@@ -204,3 +204,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# working folder for local code not to be sent to the repo 
+working/
