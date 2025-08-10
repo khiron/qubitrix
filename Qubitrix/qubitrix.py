@@ -113,17 +113,16 @@ class Game:
             min(FPS/20, self.tick_duration/2) # space
         ]
         self.score_mult_drain = MULT_BUFFER_DRAIN_COEFFICIENT/(DEPTH*FPS/(1.5*((2+self.level)/3)**1.25) + self.placement_leniency)
+    def load_upcoming_pieces(self):
+        while len(self.next_pieces) <= NEXT_PIECE_COUNT:
+            piece_bag = PIECES + [PIECES[random.randrange(0, 7)]] # adds a "bag" of a set of pieces with an extra random piece to come next
+            random.shuffle(piece_bag)
+            self.next_pieces.extend(piece_bag)
     def get_new_piece(self):
         self.tick_time = 0
         self.place_time = 0
         self.in_hard_drop = False
-        while True:
-            if len(self.next_pieces) <= NEXT_PIECE_COUNT:
-                piece_bag = PIECES*2 # repeated list
-                random.shuffle(piece_bag)
-                self.next_pieces.extend(piece_bag) # adds a "bag" of 2 sets of pieces to come next
-            else:
-                break
+        self.load_upcoming_pieces()
         self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
         self.lowest_center_elevation = self.current_piece["centers"][0][2]
         self.lowest_spin_elevation = self.current_piece["centers"][0][2]
@@ -137,14 +136,8 @@ class Game:
             current_piece_index = self.current_piece["id"] - 1 # for indexing in the PIECES list
             self.current_piece = self.held_piece
             self.held_piece = deepcopy(PIECES[current_piece_index])
-            if not self.current_piece: # empty dict. to do: remove the stupid amount of code here pasted from other identical parts of the progarm
-                while True:
-                    if len(self.next_pieces) <= NEXT_PIECE_COUNT:
-                        piece_bag = PIECES*2 # repeated list
-                        random.shuffle(piece_bag)
-                        self.next_pieces.extend(piece_bag) # adds a "bag" of 2 sets of pieces to come next
-                    else:
-                        break
+            if not self.current_piece: # empty dict
+                self.load_upcoming_pieces()
                 self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
             self.tick_time = 0
             self.place_time = 0
