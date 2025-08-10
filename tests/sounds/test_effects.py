@@ -1,5 +1,5 @@
 import pytest
-from Qubitrix.sounds import Effects
+from Qubitrix.sounds import Effects # This gives a "missing import" warning in VSCode, but still works for some reason
 
 def test_singleton():
     e1 = Effects()
@@ -8,6 +8,6 @@ def test_singleton():
 
 def test_lazy_loading():
     effects = Effects()
-    # This assumes you have a sound file named "sonic_drop.wav" in the sounds folder - this may fail currently due to the effect's name giving the entire file path from the drive
+    # This assumes you have a sound file named "sonic_drop.wav" in the sounds folder
     effect = effects._load_sound("sonic_drop")
     assert effect.name == "sonic_drop"
