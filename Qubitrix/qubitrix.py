@@ -27,26 +27,32 @@ PIECES = [ # tetracubes, float (half) values will have to be converted to int.
 ]
 COLORS = [(0, 0, 0), (200, 40, 20), (220, 120, 40), (220, 240, 60), (60, 220, 40), (20, 180, 220), (40, 80, 240), (100, 40, 220), (180, 20, 240), (120, 120, 120), (255, 160, 140), (10, 20, 30), (255, 255, 255), (255, 240, 180), (0, 0, 0)]
 NEXT_PIECE_COUNT = 5
-Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55
+Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55 # how far away the cubes appear to be
 BACKGROUND_COLORS = [tuple(COLORS[n][m]*0.35+40 for m in range(3)) for n in range(10)]
-UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # swap nearby colors
+UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # nearby colors are swapped
 CUBE_VERTEX_OFFSET = 0.46 # the size of the cube divided by 2
-GHOST_BORDER_WIDTH = int(WINDOW_HEIGHT/360)
-RENDER_CUBES = True
+GHOST_BORDER_WIDTH = int(WINDOW_HEIGHT/360) # width of ghost pieces' and secluded spaces' borders
+RENDER_CUBES = True # otherwise renders circles as a placeholder
 VISUAL_GRID_ROT_EASING = 12/FPS
 GAME_OVER_SCREEN_ANIM_TIME = 0.5 # in seconds
 ANALOG_DEADZONE_WIDTH = 0.55 # setting this above 0.7 will make diagonals impossible
-MULT_BUFFER_DRAIN_COEFFICIENT = 0.014
-MULT_DRAIN_COEFFICIENT = 1.8
-MULT_BUFFER_SIZE = 0.4
-RENDER_CENTERS = False
-PLANE_CLEAR_SCORE_BONUSES = (0, 100, 250, 500, 1000)
-SPIN_CLEAR_SCORE_FACTOR = 3
-PLANE_CLEAR_MULT_BONUSES = (0, 0.15, 0.32, 0.5, 0.7)
-SPIN_CLEAR_MULT_FACTOR = 2
+MULT_BUFFER_DRAIN_COEFFICIENT = 0.014 # affects the speed at which the multiplier buffer drains
+MULT_DRAIN_COEFFICIENT = 1.8 # affects the speed at which the multiplier itself drains with an empty buffer
+MULT_BUFFER_SIZE = 0.4 # how much score multiplier is required to fill or drain the bar fully
+RENDER_CENTERS = False # used for determining what a piece is rotating around
+PLANE_CLEAR_SCORE_BONUSES = (0, 100, 250, 500, 1000) # for 0-4 planes
+SPIN_CLEAR_SCORE_FACTOR = 3 # multiply the above bonuses by this amount for spin clears
+PLANE_CLEAR_MULT_BONUSES = (0, 0.15, 0.32, 0.5, 0.7) # for 0-4 planes
+SPIN_CLEAR_MULT_FACTOR = 2 # multiply the above bonuses by this amount for spin clears
+MAXIMUM_SELECTABLE_LEVEL = 40
+BASE_LEVEL_CLEAR_REQ = 4 # How many plane clears it takes to increment the level counter from level 1
+STAGE_LENGTH = 4 # How many levels are required to shift the color palette and increase the plane clear requirement by 1
 
 hotkeys = [7, 26, 4, 22, 14, 15, 44, 225, 51, 41] # d,w,a,s,k,l,space,lshift,semicolon,esc by default. to do: add settings for this
 controller_bindings = [14, 11, 13, 12, 2, 1, 0, 9, 3, 15, 10] # see above, but index 10 is for an alternate lower button
+
+def get_level_requirement(level):
+    return math.ceil((level)*(BASE_LEVEL_CLEAR_REQ-0.5+0.5*(level)/STAGE_LENGTH))
 
 class Game:
     def __init__(self):
@@ -60,11 +66,12 @@ class Game:
         self.mode = "Playing"
         self.score = 0
         self.total_planes_cleared = 0
-        self.plane_clear_level_progress = math.ceil((self.initial_level-1)*(3.5+0.125*(self.initial_level-1)))
+        self.plane_clear_level_progress = get_level_requirement(self.initial_level-1)
         self.total_plane_clear_types = [0, 0, 0, 0]
         self.total_spin_clear_types = [0, 0, 0]
         self.total_spins = 0
         self.secluded_spaces = 0
+        self.level = self.initial_level
         self.check_for_level_increase()
         self.score_multiplier = 1.0
         self.highest_score_multiplier = 1.0
@@ -79,24 +86,17 @@ class Game:
         self.game_over_screen_time = 0
     def init_sounds(self):
         Effects().load_all_sounds() # preload all wav files into the Effects manager
-        # wav files loaded but not used 
-        # '1_plane_clear.wav'
-        # '2_plane_clear.wav'
-        # '3_plane_clear.wav'
-        # '4_plane_clear.wav'
-        # '1_spin_clear.wav'
-        # '2_spin_clear.wav'
-        # '3_spin_clear.wav'
     def change_initial_level(self, amount):
         self.initial_level += amount
         if self.initial_level < 1:
             self.initial_level = 1
-        elif self.initial_level > 40:
-            self.initial_level = 40
+        elif self.initial_level > MAXIMUM_SELECTABLE_LEVEL:
+            self.initial_level = MAXIMUM_SELECTABLE_LEVEL
     def increase_score(self, points):
         self.score += points * self.score_multiplier
     def check_for_level_increase(self):
-        self.level = math.floor((8*self.plane_clear_level_progress+196)**0.5) - 13 # level scaling. to do: reintroduce constants
+        while self.plane_clear_level_progress >= get_level_requirement(self.level):
+            self.level += 1
         self.score_mult_cap = 1.0 + self.level/5
         self.refresh_tickspeed()
     def score_mult_bonus(self, amount):
@@ -626,7 +626,7 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
         pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT*0.325, WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
 
     pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, WINDOW_HEIGHT*0.58)) # level progress bar
-    level_progress = (game.plane_clear_level_progress-math.ceil((game.level-1)*(3.5+0.125*(game.level-1))))/(math.ceil((game.level)*(3.5+0.125*(game.level)))-math.ceil((game.level-1)*(3.5+0.125*(game.level-1)))) # proportion of plane clears gained towards the next level
+    level_progress = (game.plane_clear_level_progress-get_level_requirement(game.level-1))/(get_level_requirement(game.level)-get_level_requirement(game.level-1)) # proportion of plane clears gained towards the next level
     pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, level_progress*WINDOW_HEIGHT*0.58))
     pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178, WINDOW_HEIGHT/36)) # score multiplier bar
     pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178*game.score_mult_buffer/MULT_BUFFER_SIZE, WINDOW_HEIGHT/36))
@@ -952,9 +952,9 @@ def main():
 
     while True:
         if game.mode == "Home":
-            ui_color_id = min(math.ceil(game.initial_level/4), 9)
+            ui_color_id = min(math.ceil(game.initial_level/STAGE_LENGTH), 9)
         else:
-            ui_color_id = min(math.ceil(game.level/4), 9)
+            ui_color_id = min(math.ceil(game.level/STAGE_LENGTH), 9)
         screen.fill(tuple(int(c) for c in BACKGROUND_COLORS[ui_color_id]))
 
         if controller_connected:
