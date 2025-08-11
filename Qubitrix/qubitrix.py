@@ -8,7 +8,7 @@ from pygame.locals import QUIT, KEYDOWN, KEYUP
 from fonts import get_large_font, get_small_font
 from sounds import Effects
 from controllers.abstract_controller import AbstractController
-from controllers.keyboard_controller import KeyboardController # These give "missing import" warnings in VSCode, but still work for some reason. Any explanation?
+from controllers.keyboard_controller import KeyboardController
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 ASPECT_RATIO = WINDOW_WIDTH/WINDOW_HEIGHT
@@ -28,7 +28,6 @@ PIECES = [ # tetracubes, float (half) values will have to be converted to int.
 COLORS = [(0, 0, 0), (200, 40, 20), (220, 120, 40), (220, 240, 60), (60, 220, 40), (20, 180, 220), (40, 80, 240), (100, 40, 220), (180, 20, 240), (120, 120, 120), (255, 160, 140), (10, 20, 30), (255, 255, 255), (255, 240, 180), (0, 0, 0)]
 NEXT_PIECE_COUNT = 5
 Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55
-ALPHA_KEY_COLOR = (1, 1, 1) # transparent ghost (laggy, unused at the moment)
 BACKGROUND_COLORS = [tuple(COLORS[n][m]*0.35+40 for m in range(3)) for n in range(10)]
 UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # swap nearby colors
 CUBE_VERTEX_OFFSET = 0.46 # the size of the cube divided by 2
@@ -37,10 +36,14 @@ RENDER_CUBES = True
 VISUAL_GRID_ROT_EASING = 12/FPS
 GAME_OVER_SCREEN_ANIM_TIME = 0.5 # in seconds
 ANALOG_DEADZONE_WIDTH = 0.55 # setting this above 0.7 will make diagonals impossible
-MULT_BUFFER_DRAIN_COEFFICIENT = 0.03
+MULT_BUFFER_DRAIN_COEFFICIENT = 0.014
 MULT_DRAIN_COEFFICIENT = 1.8
 MULT_BUFFER_SIZE = 0.4
 RENDER_CENTERS = False
+PLANE_CLEAR_SCORE_BONUSES = (0, 100, 250, 500, 1000)
+SPIN_CLEAR_SCORE_FACTOR = 3
+PLANE_CLEAR_MULT_BONUSES = (0, 0.15, 0.32, 0.5, 0.7)
+SPIN_CLEAR_MULT_FACTOR = 2
 
 hotkeys = [7, 26, 4, 22, 14, 15, 44, 225, 51, 41] # d,w,a,s,k,l,space,lshift,semicolon,esc by default. to do: add settings for this
 controller_bindings = [14, 11, 13, 12, 2, 1, 0, 9, 3, 15, 10] # see above, but index 10 is for an alternate lower button
@@ -112,24 +115,25 @@ class Game:
             *[min(FPS/7.5, self.placement_leniency/4)]*6, # d,w,a,s,k,l
             min(FPS/20, self.tick_duration/2) # space
         ]
-        self.score_mult_drain = MULT_BUFFER_DRAIN_COEFFICIENT/(DEPTH*FPS/(1.5*((2+self.level)/3)**1.25) + self.placement_leniency)
     def load_upcoming_pieces(self):
         while len(self.next_pieces) <= NEXT_PIECE_COUNT:
             piece_bag = PIECES + [PIECES[random.randrange(0, 7)]] # adds a "bag" of a set of pieces with an extra random piece to come next
             random.shuffle(piece_bag)
             self.next_pieces.extend(piece_bag)
-    def get_new_piece(self):
+    def reset_piece_state(self):
         self.tick_time = 0
         self.place_time = 0
         self.in_hard_drop = False
-        self.load_upcoming_pieces()
-        self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
         self.lowest_center_elevation = self.current_piece["centers"][0][2]
         self.lowest_spin_elevation = self.current_piece["centers"][0][2]
         self.piece_spin_on_last_movement = False
+        self.get_ghost_piece()
+    def get_new_piece(self):
+        self.load_upcoming_pieces()
+        self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
         self.hold_piece_used = False
         self.get_secluded_spaces()
-        self.get_ghost_piece()
+        self.reset_piece_state()
     def hold_piece(self):
         if not self.hold_piece_used: # only if it is not already used this turn
             self.hold_piece_used = True
@@ -139,33 +143,27 @@ class Game:
             if not self.current_piece: # empty dict
                 self.load_upcoming_pieces()
                 self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
-            self.tick_time = 0
-            self.place_time = 0
-            self.in_hard_drop = False
-            self.lowest_center_elevation = self.current_piece["centers"][0][2]
-            self.lowest_spin_elevation = self.current_piece["centers"][0][2]
-            self.piece_spin_on_last_movement = False
-            self.get_ghost_piece()
+            self.reset_piece_state()
             Effects().hold_piece.play(maxtime=300) # play the sound effect for holding the piece
     def clear_planes(self):
         planes_cleared = 0
-        for z in range(HEIGHT):
+        for z in range(HEIGHT): # for each horizontal plane
             cubes = 0
             for y in range(DEPTH):
                 for x in range(WIDTH):
                     if self.grid[x][y][z] > 0:
-                        cubes += 1
-            if cubes == DEPTH*WIDTH:
+                        cubes += 1 # count the number of cubes in that plane
+            if cubes == DEPTH*WIDTH: # if the plane is full
                 planes_cleared += 1
                 for y in range(DEPTH):
                     for x in range(WIDTH):
-                        self.grid[x][y].pop(z) # remove the space
-                        self.grid[x][y].insert(0, 0) # insert an empty space at the top
-        self.increase_score((0, 100, 250, 500, 1000)[min(planes_cleared, 4)] * (3 if self.piece_spin_on_last_movement else 1))
+                        self.grid[x][y].pop(z) # remove the plane
+                        self.grid[x][y].insert(0, 0) # insert an empty plane at the top
+        self.increase_score(PLANE_CLEAR_SCORE_BONUSES[min(planes_cleared, 4)] * (SPIN_CLEAR_SCORE_FACTOR if self.piece_spin_on_last_movement else 1))
         self.total_planes_cleared += planes_cleared
         self.plane_clear_level_progress += planes_cleared
         self.check_for_level_increase()
-        self.score_mult_bonus((0, 0.15, 0.32, 0.5, 0.7)[min(planes_cleared, 4)] * (2 if self.piece_spin_on_last_movement else 1))
+        self.score_mult_bonus(PLANE_CLEAR_MULT_BONUSES[min(planes_cleared, 4)] * (SPIN_CLEAR_MULT_FACTOR if self.piece_spin_on_last_movement else 1))
         if (planes_cleared > 0) and (type(planes_cleared) == int): # ensure that only integers may be used in the eval() functions
             if not self.piece_spin_on_last_movement:
                 eval(f"Effects()['{min(planes_cleared, 4)}_plane_clear'].play(maxtime=1000)")
@@ -176,57 +174,31 @@ class Game:
         return planes_cleared
     def get_secluded_spaces(self):
         self.secluded_spaces = 0 # this could just be a returned variable, perhaps modify?
-        full_depths = []
+        visible_depths = [[[0 for _ in range(DEPTH if rot%2 else WIDTH)] for _ in range(HEIGHT)] for rot in range(4)] # Indexing: [Face rotation (in the order below)][z][x or y, depending on face - this is "a" in the below code]
+        # The below function provides how deep empty spaces go in each row from 4 perspectives relative to the default grid rotation:
+        # Front face, left face (but flipped horizontally for later code to easily index cells), back face (also flipped), right face
         for rot in range(4):
-            face_depths = []
             for z in range(HEIGHT):
-                plane_depths = []
-                for a in range(DEPTH if rot%2 else WIDTH): # swaps indexing of X and Y axes if rotation is odd
-                    while True:
-                        depth = 0
-                        for b in range(WIDTH if rot%2 else DEPTH): # b's indexing is inverted if rot >= 2
-                            match rot:
-                                case 0:
-                                    if self.grid[a][b][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 1:
-                                    if self.grid[b][a][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 2:
-                                    if self.grid[a][DEPTH-b-1][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 3:
-                                    if self.grid[WIDTH-b-1][a][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break # to do: make less clunky?
-                        break
-                    plane_depths.append(depth)
-                face_depths.append(plane_depths)
+                for a in range(DEPTH if rot%2 else WIDTH): # Swaps indexing of X and Y axes if rotation is odd
+                    depth = 0
+                    for b in range(WIDTH if rot%2 else DEPTH): # b's indexing is inverted if rot >= 2
+                        if self.grid[(a, b, a, WIDTH-b-1)[rot]][(b, a, DEPTH-b-1, a)[rot]][z] <= 0: # Index based on the order of faces listed above
+                            depth += 1
+                        else:
+                            break
+                    visible_depths[rot][z][a] = depth
             for z in range(HEIGHT-1): # excluding topmost layer, done from bottom to top
                 for a in range(DEPTH if rot%2 else WIDTH):
-                    if face_depths[HEIGHT-z-1][a] < face_depths[HEIGHT-z-2][a]: # if the lower row has a lesser depth than the upper row
-                        face_depths[HEIGHT-z-1][a] = face_depths[HEIGHT-z-2][a] - 1 # set the lower row to the upper row's value minus one, as it is visible from the top
-            full_depths.append(face_depths)
+                    if visible_depths[rot][HEIGHT-z-1][a] < visible_depths[rot][HEIGHT-z-2][a]: # If the lower row has a lesser depth than the upper row...
+                        visible_depths[rot][HEIGHT-z-1][a] = visible_depths[rot][HEIGHT-z-2][a] - 1 # set the lower row to the upper row's value minus one, as it is visible that far from the top.
         for z in range(HEIGHT-1): # topmost plane (z=0) cannot be secluded, thus z+1 will be used
             for y in range(DEPTH):
                 for x in range(WIDTH):
-                    if self.grid[x][y][z+1] <= 0:
+                    if self.grid[x][y][z+1] <= 0: # For every empty cube in the grid
                         secluded_directions = 0
-                        if full_depths[0][z+1][x] < y: # if the visible depth is less than the depth of the cube in a given direction, it is secluded in that direction
-                            secluded_directions += 1
-                        if full_depths[1][z+1][y] < x:
-                            secluded_directions += 1
-                        if full_depths[2][z+1][x] < DEPTH-y-1:
-                            secluded_directions += 1
-                        if full_depths[3][z+1][y] < WIDTH-x-1:
-                            secluded_directions += 1
+                        for dir in range(4): # for each of the 4 directions - while this may be a lot of checks, for typical board sizes this takes less than 1ms on a typical system. Even on lower-end systems, this should not cause considerable lag compared to that of rendering.
+                            if visible_depths[dir][z+1][y if dir%2 else x] < (y, x, DEPTH-y-1, WIDTH-x-1)[dir]:
+                                secluded_directions += 1 # If the visible depth is less than the depth of the cube in a given direction, it is secluded in that direction.
                         if secluded_directions >= 3:
                             self.grid[x][y][z+1] = -1
                             self.secluded_spaces += 1
@@ -275,6 +247,13 @@ class Game:
             Effects().place_hard.play(maxtime=300) # play the sound effect for hard dropping the piece
         else:
             Effects().place_soft.play(maxtime=200) 
+    def score_multiplier_tick(self):
+        self.score_mult_buffer -= self.score_multiplier * MULT_BUFFER_DRAIN_COEFFICIENT / FPS
+        if self.score_mult_buffer < 0:
+            self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
+            self.score_mult_buffer = 0
+            if self.score_multiplier < 1:
+                self.score_multiplier = 1
     def tick(self):
         for n in range(len(self.key_hold_times)):
             if self.key_hold_times[n] > 0:
@@ -285,21 +264,13 @@ class Game:
                     self.basic_input(n, repeat=True)
                 elif n != 6: # excludes holding down hard drop
                     self.modified_input(n)
-        self.score_mult_buffer -= self.score_mult_drain
-        if self.score_mult_buffer < 0:
-            self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
-            self.score_mult_buffer = 0
-            if self.score_multiplier < 1:
-                self.score_multiplier = 1
+        self.score_multiplier_tick()
         if not self.piece_grounded(self.current_piece):
             self.tick_time += 1
         else:
             self.place_time += 1
-        while True:
-            if (self.tick_time >= self.tick_duration) and not self.piece_grounded(self.current_piece):
-                self.lower_piece(self.current_piece)
-            else:
-                break
+        while (self.tick_time >= self.tick_duration) and not self.piece_grounded(self.current_piece):
+            self.lower_piece(self.current_piece)
         if (self.place_time >= self.tick_duration + self.placement_leniency) and self.piece_grounded(self.current_piece):
             self.place_piece()
         if self.in_hard_drop == True:
@@ -669,11 +640,11 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
                                      ("Piece spins:", str(game.total_spins)), ("Spin singles:", str(game.total_spin_clear_types[0])), ("Spin doubles:", str(game.total_spin_clear_types[1])), ("Spin triples:", str(game.total_spin_clear_types[2]))))):
         category_text = font_small.render(category, False, COLORS[-3])
         category_text_rect = category_text.get_rect()
-        category_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.145+0.09*position))
+        category_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.235+0.09*position))
         screen.blit(category_text, category_text_rect)
         stat_text = font_small.render(stat, False, COLORS[-2])
         stat_text_rect = stat_text.get_rect()
-        stat_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.195+0.09*position))
+        stat_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.285+0.09*position))
         screen.blit(stat_text, stat_text_rect)
 
 def draw_pause_ui(screen, font_small):
