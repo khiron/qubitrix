@@ -20,14 +20,14 @@ class GameEvent(Enum):
     ROTATE_PIECE_CLOCKWISE = 13
     ROTATE_PIECE_COUNTERCLOCKWISE = 14
     SONIC_DROP_PIECE = 15
-    QUIT_GAME = 16
-    REVEAL_GRID = 17 # only to be done on the Game Over screen. Currently is not able to be called.
+    QUIT_GAME = 16 # This should only pause the game if it is currently playing, and it should only quit the game on the pause or home screens.
+    REVEAL_GRID = 17 # Only to be done on the Game Over screen. Currently is not able to be called.
 
 class AbstractController(ABC):
     def __init__(self):
         self.subscribers = []
 
-    def subscribe(self, callback: Callable[[GameEvent], None]):
+    def subscribe(self, callback: Callable[[GameEvent], None]): # this typing seems to not align with what I have to do?
         """Subscribe a callback to receive controller events."""
         self.subscribers.append(callback)
 
@@ -37,6 +37,7 @@ class AbstractController(ABC):
             callback(event)
 
     @abstractmethod
-    def process_events(self):
-        """Process input events and notify subscribers."""
+    def process_events(event):
+        """Processes input events and notify subscribers."""
+        print(event)
         pass

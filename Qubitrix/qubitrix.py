@@ -7,7 +7,7 @@ from pygame.locals import QUIT, KEYDOWN, KEYUP
 
 from fonts import get_large_font, get_small_font
 from sounds import Effects
-from controllers.abstract_controller import AbstractController
+from controllers.abstract_controller import AbstractController, GameEvent # type: ignore
 from controllers.keyboard_controller import KeyboardController
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
@@ -930,6 +930,36 @@ def keyboard_input_check(event, game):
         except ValueError:
             pass
 
+def global_tick(game):
+    match game.mode:
+        case "Playing":
+            game.tick()
+        case "Paused":
+            game.ease_grid_rotation() # to prevent the grid from being stuck at an improper angle when paused
+        case "Finished":
+            game.ease_grid_rotation()
+            game.game_over_screen_tick()
+    
+def global_render(screen, game, font_small, font_large, ui_color_id):
+    match game.mode:
+        case "Playing":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_game_grid(screen, game)
+            draw_next_pieces(screen, game)
+            draw_ghost_display(screen, game)
+        case "Paused":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_pause_ui(screen, font_small)
+        case "Finished":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_game_grid(screen, game)
+            draw_next_pieces(screen, game)
+            draw_ghost_display(screen, game)
+            if not game.rotate_modifier:
+                draw_finish_ui(screen, game, font_small, font_large, ui_color_id)
+        case "Home":
+            draw_home_ui(screen, game, font_small, font_large)
+
 def main():
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -943,8 +973,8 @@ def main():
     pygame.joystick.init()
     controller_connected = pygame.joystick.get_count() > 0
     if controller_connected:
-        controller = pygame.joystick.Joystick(0)
-        numbuttons = controller.get_numbuttons()
+        jst_controller = pygame.joystick.Joystick(0)
+        numbuttons = jst_controller.get_numbuttons()
         controller_button_states = [False for _ in range(len(controller_bindings))]
         controller_analog_states = [False for _ in range(9)] # note that indexes 6 and 7 are unused
     game = Game()
@@ -958,7 +988,7 @@ def main():
         screen.fill(tuple(int(c) for c in BACKGROUND_COLORS[ui_color_id]))
 
         if controller_connected:
-            controller_input_check(controller, controller_button_states, controller_analog_states, game)
+            controller_input_check(jst_controller, controller_button_states, controller_analog_states, game)
 
         # kb_controller.process_events() # This prevents Pygame from fetching any other keyboard inputs, so it is disabled for the time being.
 
@@ -968,33 +998,9 @@ def main():
                 sys.exit()
             keyboard_input_check(event, game) # soon to be deprecated
         
-        match game.mode:
-            case "Playing":
-                game.tick()
-            case "Paused":
-                game.ease_grid_rotation() # to prevent the grid from being stuck at an improper angle when paused
-            case "Finished":
-                game.ease_grid_rotation()
-                game.game_over_screen_tick()
+        global_tick(game)
 
-        match game.mode:
-            case "Playing":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_game_grid(screen, game)
-                draw_next_pieces(screen, game)
-                draw_ghost_display(screen, game)
-            case "Paused":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_pause_ui(screen, font_small)
-            case "Finished":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_game_grid(screen, game)
-                draw_next_pieces(screen, game)
-                draw_ghost_display(screen, game)
-                if not game.rotate_modifier:
-                    draw_finish_ui(screen, game, font_small, font_large, ui_color_id)
-            case "Home":
-                draw_home_ui(screen, game, font_small, font_large)
+        global_render(screen, game, font_small, font_large, ui_color_id)
         
         pygame.display.update()
         if ((pygame.time.Clock.get_fps(clock) / FPS) < 0.98) and pygame.time.get_ticks() > 500:

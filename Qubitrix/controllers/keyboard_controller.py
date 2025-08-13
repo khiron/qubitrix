@@ -1,5 +1,5 @@
 import pygame
-from controllers.abstract_controller import AbstractController, GameEvent # This also gives a "missing import" warning in VSCode, but still works for some reason
+from controllers.abstract_controller import AbstractController, GameEvent # type: ignore
 
 class KeyboardController(AbstractController):
     MODIFIER_KEY_ID = 0 # Set to KMOD_LSHIFT. This current implementation only allows for detecting if keys such as Shift/Ctrl/Alt are pressed, and is thus subject to change.
@@ -27,6 +27,8 @@ class KeyboardController(AbstractController):
     }
 
     def process_events(self):
+        if AbstractController.process_events not in self.subscribers:
+            self.subscribe(AbstractController.process_events) # type: ignore
         for event in pygame.event.get():
             if event.type == pygame.KEYDOWN:
                 # Whether the modifier key is held or not is determined through a bitwise AND function between pygame.key.get_mods() and whichever bit MODIFIER_KEY_ID is set to.

@@ -10,7 +10,7 @@
 
 [project]
 name = "qubitrix"
-version = "0.1.4"
+version = "0.1.5"
 description = "3D falling block game"
 authors = [{ name="Frederick McEvoy", email="FreddieM2048@gmail.com" }]
 readme = "README.md"
