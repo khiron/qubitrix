@@ -88,10 +88,8 @@ class Game:
         Effects().load_all_sounds() # preload all wav files into the Effects manager
     def change_initial_level(self, amount):
         self.initial_level += amount
-        if self.initial_level < 1:
-            self.initial_level = 1
-        elif self.initial_level > MAXIMUM_SELECTABLE_LEVEL:
-            self.initial_level = MAXIMUM_SELECTABLE_LEVEL
+        self.initial_level = max(self.initial_level, 1)
+        self.initial_level = min(self.initial_level, MAXIMUM_SELECTABLE_LEVEL)
     def increase_score(self, points):
         self.score += points * self.score_multiplier
     def check_for_level_increase(self):
@@ -104,10 +102,8 @@ class Game:
         if self.score_mult_buffer > MULT_BUFFER_SIZE:
             self.score_multiplier += self.score_mult_buffer - MULT_BUFFER_SIZE
             self.score_mult_buffer = MULT_BUFFER_SIZE
-            if self.score_multiplier > self.score_mult_cap:
-                self.score_multiplier = self.score_mult_cap
-        if self.highest_score_multiplier < self.score_multiplier:
-            self.highest_score_multiplier = self.score_multiplier
+            self.score_multiplier = min(self.score_multiplier, self.score_mult_cap)
+        self.highest_score_multiplier = max(self.highest_score_multiplier, self.score_multiplier)
     def refresh_tickspeed(self):
         self.tick_duration = FPS/(1.5*((2+self.level)/3)**1.25)*(1+self.secluded_spaces/25) # show mercy when there is a large number of secluded spaces to fill
         self.placement_leniency = FPS/(1.5*((2+self.level)/3)**1.25) * self.level**0.75
@@ -200,7 +196,7 @@ class Game:
                             if visible_depths[dir][z+1][y if dir%2 else x] < (y, x, DEPTH-y-1, WIDTH-x-1)[dir]:
                                 secluded_directions += 1 # If the visible depth is less than the depth of the cube in a given direction, it is secluded in that direction.
                         if secluded_directions >= 3:
-                            self.grid[x][y][z+1] = -1
+                            self.grid[x][y][z+1] = -1 # secluded spaces in the game grid have an ID of -1
                             self.secluded_spaces += 1
     def check_piece_elevation(self):
         if self.current_piece["centers"][0][2] > self.lowest_center_elevation:
@@ -217,8 +213,7 @@ class Game:
                 if self.current_piece["centers"][0][2] > self.lowest_center_elevation:
                     self.increase_score(1) # increase score for manual lowering if enough time is saved (and it was not a previously reached depth this turn)
             self.tick_time -= self.tick_duration
-            if self.tick_time < 0:
-                self.tick_time = 0
+            self.tick_time = max(self.tick_time, 0)
         if manual:
             Effects().lower_piece.play(maxtime=100) # play the sound effect for manually lowering the piece
         self.check_piece_elevation()
@@ -252,8 +247,7 @@ class Game:
         if self.score_mult_buffer < 0:
             self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
             self.score_mult_buffer = 0
-            if self.score_multiplier < 1:
-                self.score_multiplier = 1
+            self.score_multiplier = max(self.score_multiplier, 1)
     def tick(self):
         for n in range(len(self.key_hold_times)):
             if self.key_hold_times[n] > 0:
@@ -314,10 +308,7 @@ class Game:
         return False
     def move_piece(self, piece, rot):
         self.piece_spin_on_last_movement = False
-        x = [1, 0, -1, 0][(rot+self.grid_rotation)%4]
-        y = [0, 1, 0, -1][(rot+self.grid_rotation)%4] # get the movement in each axis based on the input and current grid rotation
-        # x_modified = int(round(x*math.cos(self.grid_rotation*math.pi/2)-y*math.sin(self.grid_rotation*math.pi/2)))
-        # y_modified = int(round(y*math.cos(self.grid_rotation*math.pi/2)+x*math.sin(self.grid_rotation*math.pi/2))) # modify x and y movements with grid rotation. also the + and - here have to be swapped, or movement inverts itself for odd rotations I guess
+        x, y = [1, 0, -1, 0][(rot+self.grid_rotation)%4], [0, 1, 0, -1][(rot+self.grid_rotation)%4] # get the movement in each axis based on the input and current grid rotation
         for n in range(len(piece["cubes"])):
             cube = piece["cubes"][n]
             if not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2] <= HEIGHT-1): # if outside at least one of the boundaries
@@ -325,11 +316,9 @@ class Game:
             if self.check_for_collision(cube, x, y, 0): # collisions with tiles in-bounds
                 return False
         for n in range(len(piece["cubes"])):
-            piece["cubes"][n][0] += x
-            piece["cubes"][n][1] += y # move the piece
+            piece["cubes"][n] = [piece["cubes"][n][axis] + [x, y, 0][axis] for axis in range(3)] # move the piece
         for n in range(len(piece["centers"])):
-            piece["centers"][n][0] += x
-            piece["centers"][n][1] += y # move the rotation center
+            piece["centers"][n] = [piece["centers"][n][axis] + [x, y, 0][axis] for axis in range(3)] # move all of the possible rotation centers
         self.get_ghost_piece()
         if self.piece_fully_grounded(self.ghost_piece):
             Effects().move_piece_gold.play(maxtime=300) # play the sound effect for moving the piece if it is fully grounded
@@ -338,13 +327,9 @@ class Game:
         return True
     def force_move_piece(self, piece, x, y, z): # absolute positioning, no collision checking 
         for n in range(len(piece["cubes"])):
-            piece["cubes"][n][0] += x
-            piece["cubes"][n][1] += y # move the piece
-            piece["cubes"][n][2] += z
+            piece["cubes"][n] = [piece["cubes"][n][axis] + [x, y, z][axis] for axis in range(3)] # move the piece
         for n in range(len(piece["centers"])):
-            piece["centers"][n][0] += x
-            piece["centers"][n][1] += y # move all of the possible rotation centers
-            piece["centers"][n][2] += z
+            piece["centers"][n] = [piece["centers"][n][axis] + [x, y, z][axis] for axis in range(3)] # move all of the possible rotation centers
         self.check_piece_elevation()
     def drop_piece(self, instant_placement=False):
         while True:
@@ -359,29 +344,25 @@ class Game:
             cube_placements_found = 0
             for n in range(len(modified_piece["cubes"])):
                 cube = modified_piece["cubes"][n]
-                if (not self.check_for_collision(cube, 0, 0, -1)) and not (not (0 <= cube[0] <= WIDTH-1) or not (0 <= cube[1] <= DEPTH-1) or not (cube[2]-1 <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving upwards
+                if (self.check_for_collision(cube, 0, 0, -1), (0 <= cube[0] <= WIDTH-1), (0 <= cube[1] <= DEPTH-1), (cube[2]-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving upwards
                     cube_placements_found += 1
             if cube_placements_found == len(modified_piece["cubes"]):
                 self.force_move_piece(modified_piece, 0, 0, -1)
             else:
                 return # no further checks given
-    def detect_spin(self, modified_piece, axis): # where axis refers to the pole which the piece is rotated around
-        spin_check_displacements = [(0, 0, -1)] # upward check
-        if axis != 0: # left/right or cw/ccw rotations
-            spin_check_displacements.extend([(0, 1, 0), (0, -1, 0)]) # check for the piece being movable in the forward/backward directions
-        if axis != 1: # forward/backward or cw/ccw rotations
-            spin_check_displacements.extend([(1, 0, 0), (-1, 0, 0)]) # check for the piece being movable in the left/right directions
+    def detect_spin(self, modified_piece):
+        spin_check_displacements = [(0, 0, -1), (0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0)] # The piece can only be movable downwards in its rotation to have a spin detected.
         for relative_x, relative_y, relative_z in spin_check_displacements:
             cube_placements_found = 0
             for n in range(len(modified_piece["cubes"])):
                 cube = modified_piece["cubes"][n]
-                if (not self.check_for_collision(cube, relative_x, relative_y, relative_z)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                     cube_placements_found += 1
             if cube_placements_found == len(modified_piece["cubes"]):
                 return # the piece should not be movable in any of the given directions - otherwise, it is not considered a spin
         if self.current_piece["centers"][0][2] > self.lowest_spin_elevation: # only if the spin as at a lower point than the last spin this turn (prevents repeated point gain)
             self.lowest_spin_elevation = self.current_piece["centers"][0][2]
-            final_spin_displacement = abs(self.current_piece["centers"][0][0]-modified_piece["centers"][0][0])+abs(self.current_piece["centers"][0][1]-modified_piece["centers"][0][1])+abs(self.current_piece["centers"][0][2]-modified_piece["centers"][0][2])
+            final_spin_displacement = sum((abs(self.current_piece["centers"][0][axis]-modified_piece["centers"][0][axis]) for axis in range(3)))
             self.increase_score(20+10*final_spin_displacement)
             self.score_mult_bonus(0.14+0.07*final_spin_displacement)
             self.piece_spin_on_last_movement = True
@@ -475,7 +456,7 @@ while True:
                     if cube_placements_found == len(rotated_piece["cubes"]):
                         self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z)
                         self.raise_piece_to_initial_center(rotated_piece)
-                        self.detect_spin(rotated_piece, axis)
+                        self.detect_spin(rotated_piece)
                         self.current_piece = rotated_piece
                         rotation_success = True
                         self.get_ghost_piece()
@@ -493,7 +474,7 @@ while True:
                         if cube_placements_found == len(rotated_piece["cubes"]):
                             self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z-1)
                             self.raise_piece_to_initial_center(rotated_piece)
-                            self.detect_spin(rotated_piece, axis)
+                            self.detect_spin(rotated_piece)
                             self.current_piece = rotated_piece
                             rotation_success = True
                             self.get_ghost_piece()
@@ -526,7 +507,7 @@ while True:
                         for m in range(len(rotated_piece["cubes"])):
                             if translated_piece["cubes"][m] in original_cubes_touched: # if the current piece is in contact with the rotated and translated piece
                                 self.raise_piece_to_initial_center(translated_piece)
-                                self.detect_spin(translated_piece, axis)
+                                self.detect_spin(translated_piece)
                                 self.current_piece = translated_piece
                                 rotation_success = True
                                 self.get_ghost_piece()
