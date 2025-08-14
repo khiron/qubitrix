@@ -375,6 +375,15 @@ class Game:
                 self.lower_piece(self.ghost_piece, tick_modification=False)
             else:
                 return
+    def commit_piece_rotation(self, modified_piece):
+        self.raise_piece_to_initial_center(modified_piece)
+        self.detect_spin(modified_piece)
+        self.current_piece = modified_piece
+        self.get_ghost_piece()
+        if self.piece_fully_grounded(self.ghost_piece):
+            Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
+        else:
+            Effects().rotate_piece.play(maxtime=200) # play the sound effect for rotating the piece
     def rotate_piece(self, input):
         self.piece_spin_on_last_movement = False
         if input < 4:
@@ -388,26 +397,16 @@ class Game:
             elif (input < 4): # second priority check: whichever center point is closest to the movement direction
                 self.current_piece["centers"] = sorted(self.current_piece["centers"], key=lambda position: position[input%2] * (-1 if input < 2 else 1))
         rotated_piece = deepcopy(self.current_piece)
-        for n in range(len(rotated_piece["cubes"])):
-            rotated_piece["cubes"][n][movable_axes[0]] -= rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["cubes"][n][movable_axes[1]] -= rotated_piece["centers"][0][movable_axes[1]] # make the cubes' relative centers (0,0) on the two movable axes
-            a = rotated_piece["cubes"][n][movable_axes[0]]
-            b = rotated_piece["cubes"][n][movable_axes[1]]
-            rotated_piece["cubes"][n][movable_axes[0]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2)
-            rotated_piece["cubes"][n][movable_axes[1]] = b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the cubes relative to the axis
-            rotated_piece["cubes"][n][movable_axes[0]] = int(round(rotated_piece["cubes"][n][movable_axes[0]] + rotated_piece["centers"][0][movable_axes[0]]))
-            rotated_piece["cubes"][n][movable_axes[1]] = int(round(rotated_piece["cubes"][n][movable_axes[1]] + rotated_piece["centers"][0][movable_axes[1]])) # move the cubes back to the axis's position, convert float to int
-        for n in range(len(rotated_piece["centers"])-1):
-            n = n+1 # start indexing for the alternate center (index 1)
-            rotated_piece["centers"][n][movable_axes[0]] -= rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["centers"][n][movable_axes[1]] -= rotated_piece["centers"][0][movable_axes[1]] # make the alternate center's relative centers (0,0) on the two movable axes
-            a = rotated_piece["centers"][n][movable_axes[0]]
-            b = rotated_piece["centers"][n][movable_axes[1]]
-            rotated_piece["centers"][n][movable_axes[0]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2)
-            rotated_piece["centers"][n][movable_axes[1]] = b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the center relative to the axis
-            rotated_piece["centers"][n][movable_axes[0]] = rotated_piece["centers"][n][movable_axes[0]] + rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["centers"][n][movable_axes[1]] = rotated_piece["centers"][n][movable_axes[1]] + rotated_piece["centers"][0][movable_axes[1]] # move the alternate center back to the axis's position, convert float to int
-        rotation_success = False
+        for (attribute, set) in (("cubes", range(len(rotated_piece["cubes"]))), ("centers", range(len(rotated_piece["centers"]))[1:])): # start indexing from the alternate centers (index 1 onwards)
+            for n in set:
+                for movable_axis in movable_axes:
+                    rotated_piece[attribute][n][movable_axis] -= rotated_piece["centers"][0][movable_axis] # make the cubes' and alternate centers' relative centers (0,0) on the two movable axes
+                (a, b) = (rotated_piece[attribute][n][movable_axis] for movable_axis in movable_axes) # get the relative coordinates
+                rotated_piece[attribute][n][movable_axes[0]], rotated_piece[attribute][n][movable_axes[1]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2), b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the cubes and centers relative to the axis
+                for movable_axis in movable_axes:
+                    rotated_piece[attribute][n][movable_axis] += rotated_piece["centers"][0][movable_axis] # move the cubes and alternate centers back to the axis's position
+                    if attribute == "cubes":
+                        rotated_piece[attribute][n][movable_axis] = round(rotated_piece[attribute][n][movable_axis]) # make sure the cubes' coordinates are integers (preventing floating point rounding errors)
         coordinate_ranges = []
         for n in range(3): # get how wide, deep, and tall the rotated piece is
             axis_positions = []
@@ -416,18 +415,16 @@ class Game:
             coordinate_ranges.append(axis_positions)
         for n in range(len(coordinate_ranges)):
             coordinate_ranges[n] = max(coordinate_ranges[n])-min(coordinate_ranges[n])+1 # actual range for each coordinate
-        for comparison, push_axis, movement in [(">= 0", 0, [1,0,0]), (">= 0", 1, [0,1,0]), ("<= WIDTH-1", 0, [-1,0,0]), ("<= DEPTH-1", 1, [0,-1,0])]: # evaluate the given code (pushing the piece out of the border) for each of the 4 conditions
-            exec(f"""
-while True:
-    for n in range(len(rotated_piece['cubes'])):
-        pushed = False
-        cube = rotated_piece['cubes'][n]
-        if not (cube[{push_axis}] {comparison}):
-            pushed = True
-            self.force_move_piece(rotated_piece, *{movement})
-    if not pushed:
-        break
-            """)
+        for invert_coordinates, border, push_axis, movement in [(True, 0, 0, [1,0,0]), (True, 0, 1, [0,1,0]), (False, WIDTH-1, 0, [-1,0,0]), (False, DEPTH-1, 1, [0,-1,0])]: # puch the piece out of meach of the 4 boundaries - first two checks have to be greater than or equal to 0, so the coordinate is inverted
+            while True:
+                for n in range(len(rotated_piece['cubes'])):
+                    pushed = False
+                    cube = rotated_piece['cubes'][n]
+                    if not (cube[push_axis] * (-1 if invert_coordinates else 1) <= border):
+                        pushed = True
+                        self.force_move_piece(rotated_piece, *movement)
+                if not pushed:
+                    break
         if not self.piece_held_by_overhang(self.current_piece): # special case for things such as t-spin triples
             for relative_z in (0, 1, -1): # correct downward first if initial position fails, then upward.
                 cube_placements_found = 0
@@ -446,7 +443,7 @@ while True:
                         upwards_special_case = -1
                     for n in range(len(rotated_piece["cubes"])):
                         cube = rotated_piece["cubes"][n]
-                        if (not self.check_for_collision(cube, relative_x, relative_y, relative_z)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                        if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                             cube_placements_found += 1
                         elif relative_z == -1:
                             if (abs(cube[0]-rotated_piece["centers"][0][0])+abs(cube[1]-rotated_piece["centers"][0][1])+(cube[2]-rotated_piece["centers"][0][2]) >= 2) and upwards_special_case >= 0: # special case for long/tall pieces pushing up against something. last coordinate is intentionally not an absolute value
@@ -455,67 +452,43 @@ while True:
                                 upwards_special_case = -1
                     if cube_placements_found == len(rotated_piece["cubes"]):
                         self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z)
-                        self.raise_piece_to_initial_center(rotated_piece)
-                        self.detect_spin(rotated_piece)
-                        self.current_piece = rotated_piece
-                        rotation_success = True
-                        self.get_ghost_piece()
-                        if self.piece_fully_grounded(self.ghost_piece):
-                            Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                        else:
-                            Effects().rotate_piece.play(maxtime=200)
+                        self.commit_piece_rotation(rotated_piece)
                         return
                     elif upwards_special_case == 1:
                         cube_placements_found = 0
                         for n in range(len(rotated_piece["cubes"])):
                             cube = rotated_piece["cubes"][n]
-                            if (not self.check_for_collision(cube, relative_x, relative_y, relative_z-1)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z-1 <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                            if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                                 cube_placements_found += 1
                         if cube_placements_found == len(rotated_piece["cubes"]):
                             self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z-1)
-                            self.raise_piece_to_initial_center(rotated_piece)
-                            self.detect_spin(rotated_piece)
-                            self.current_piece = rotated_piece
-                            rotation_success = True
-                            self.get_ghost_piece()
-                            if self.piece_fully_grounded(self.ghost_piece):
-                                Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                            else:
-                                Effects().rotate_piece.play(maxtime=200)
+                            self.commit_piece_rotation(rotated_piece)
                             return
-        if not rotation_success: # if the piece needs to be moved (to do: this rotation_success variable does nothing. maybe remove/rework it?)
-            horizontal_displacements = []
-            for y in range(-coordinate_ranges[1], coordinate_ranges[1]+1):
-                for x in range(-coordinate_ranges[0], coordinate_ranges[0]+1):
-                    horizontal_displacements.append([x, y])
-            preferred_displacement = [[0.001,-0.0001],[0.0001,0.001],[-0.001,0.0001],[-0.0001,-0.001]][input if input < 4 else (self.grid_rotation+1)%4] # displacements are checked for first in these positions based on the input given... (0.001 values are to prioritize [0,0] displacement forst, then in that direction; 0.0001 for a clockwise check thereafter) [and is set to to always correct backwards relative to the camera for cw/ccw rotations]
-            horizontal_displacements = sorted(horizontal_displacements, key=lambda displacement: ((displacement[0]-preferred_displacement[0])**2+(displacement[1]-preferred_displacement[1])**2)) # then by Euclidean distance between those positions
-            for z in range(-coordinate_ranges[2], coordinate_ranges[2]+1)[::-1]: # every value from the negative to the positive end of that value. Z axis (bottom to top) is done first            
-                for x, y in horizontal_displacements:
-                    cube_placements_found = 0
-                    for n in range(len(rotated_piece["cubes"])):
-                        cube = rotated_piece["cubes"][n]
-                        if (not self.check_for_collision(cube, x, y, z)) and not (not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2]+z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
-                            cube_placements_found += 1
-                    if cube_placements_found == len(rotated_piece["cubes"]):
-                        original_cubes_touched = [] # made into all cubes the unrotated piece has touched
-                        for n in range(len(self.current_piece["cubes"])):
-                            for dx, dy, dz in [(0,0,0), (1,0,0), (0,1,0), (0,0,1), (-1,0,0), (0,-1,0), (0,0,-1)]: # the cube and its adjacent neighbors
-                                original_cubes_touched.append([self.current_piece["cubes"][n][0]+dx, self.current_piece["cubes"][n][1]+dy, self.current_piece["cubes"][n][2]+dz])
-                        translated_piece = deepcopy(rotated_piece)
-                        self.force_move_piece(translated_piece, x, y, z)
-                        for m in range(len(rotated_piece["cubes"])):
-                            if translated_piece["cubes"][m] in original_cubes_touched: # if the current piece is in contact with the rotated and translated piece
-                                self.raise_piece_to_initial_center(translated_piece)
-                                self.detect_spin(translated_piece)
-                                self.current_piece = translated_piece
-                                rotation_success = True
-                                self.get_ghost_piece()
-                                if self.piece_fully_grounded(self.ghost_piece):
-                                    Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                                else:
-                                    Effects().rotate_piece.play(maxtime=200) # play the sound effect for rotating the piece
-                                return
+        # if the piece needs to be moved, and has not already returned in a valid position
+        horizontal_displacements = []
+        for y in range(-coordinate_ranges[1], coordinate_ranges[1]+1):
+            for x in range(-coordinate_ranges[0], coordinate_ranges[0]+1):
+                horizontal_displacements.append([x, y])
+        preferred_displacement = [[0.001,-0.0001],[0.0001,0.001],[-0.001,0.0001],[-0.0001,-0.001]][input if input < 4 else (self.grid_rotation+1)%4] # displacements are checked for first in these positions based on the input given... (0.001 values are to prioritize [0,0] displacement forst, then in that direction; 0.0001 for a clockwise check thereafter) [and is set to to always correct backwards relative to the camera for cw/ccw rotations]
+        horizontal_displacements = sorted(horizontal_displacements, key=lambda displacement: ((displacement[0]-preferred_displacement[0])**2+(displacement[1]-preferred_displacement[1])**2)) # then by Euclidean distance between those positions
+        for z in range(-coordinate_ranges[2], coordinate_ranges[2]+1)[::-1]: # every value from the negative to the positive end of that value. Z axis (bottom to top) is done first            
+            for x, y in horizontal_displacements:
+                cube_placements_found = 0
+                for n in range(len(rotated_piece["cubes"])):
+                    cube = rotated_piece["cubes"][n]
+                    if (not self.check_for_collision(cube, x, y, z)) and not (not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2]+z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                        cube_placements_found += 1
+                if cube_placements_found == len(rotated_piece["cubes"]):
+                    original_cubes_touched = [] # made into all cubes the unrotated piece has touched
+                    for n in range(len(self.current_piece["cubes"])):
+                        for dx, dy, dz in [(0,0,0), (1,0,0), (0,1,0), (0,0,1), (-1,0,0), (0,-1,0), (0,0,-1)]: # the cube and its adjacent neighbors
+                            original_cubes_touched.append([self.current_piece["cubes"][n][0]+dx, self.current_piece["cubes"][n][1]+dy, self.current_piece["cubes"][n][2]+dz])
+                    translated_piece = deepcopy(rotated_piece)
+                    self.force_move_piece(translated_piece, x, y, z)
+                    for m in range(len(rotated_piece["cubes"])):
+                        if translated_piece["cubes"][m] in original_cubes_touched: # if the current piece is in contact with the rotated and translated piece
+                            self.commit_piece_rotation(translated_piece)
+                            return
         Effects().rotation_blocked.play(maxtime=400) # return statement cancels this
     def basic_input(self, input, repeat=False):
         match input:
