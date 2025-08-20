@@ -47,6 +47,9 @@ SPIN_CLEAR_MULT_FACTOR = 2 # multiply the above bonuses by this amount for spin 
 MAXIMUM_SELECTABLE_LEVEL = 40
 BASE_LEVEL_CLEAR_REQ = 4 # How many plane clears it takes to increment the level counter from level 1
 STAGE_LENGTH = 4 # How many levels are required to shift the color palette and increase the plane clear requirement by 1
+TICK_DURATION_SCALE_EXPONENT = 1.25
+PLACEMENT_LENIENCY_SCALE_EXPONENT = 0.42
+SECLUDED_SPACE_MERCY_COEFFICIENT = 0.04
 
 hotkeys = [7, 26, 4, 22, 14, 15, 44, 225, 51, 41] # d,w,a,s,k,l,space,lshift,semicolon,esc by default. to do: add settings for this
 controller_bindings = [14, 11, 13, 12, 2, 1, 0, 9, 3, 15, 10] # see above, but index 10 is for an alternate lower button
@@ -105,8 +108,8 @@ class Game:
             self.score_multiplier = min(self.score_multiplier, self.score_mult_cap)
         self.highest_score_multiplier = max(self.highest_score_multiplier, self.score_multiplier)
     def refresh_tickspeed(self):
-        self.tick_duration = FPS/(1.5*((2+self.level)/3)**1.25)*(1+self.secluded_spaces/25) # show mercy when there is a large number of secluded spaces to fill
-        self.placement_leniency = FPS/(1.5*((2+self.level)/3)**1.25) * self.level**0.75
+        self.tick_duration = FPS/(1.5*((2+self.level)/3)**TICK_DURATION_SCALE_EXPONENT)*(1+self.secluded_spaces*SECLUDED_SPACE_MERCY_COEFFICIENT) # show mercy when there is a large number of secluded spaces to fill
+        self.placement_leniency = FPS/(1.5*((2+self.level)/3)**PLACEMENT_LENIENCY_SCALE_EXPONENT)
         self.repeat_input_times = [ # faster for soft dropping and slower for other inputs
             *[min(FPS/7.5, self.placement_leniency/4)]*6, # d,w,a,s,k,l
             min(FPS/20, self.tick_duration/2) # space
@@ -243,7 +246,7 @@ class Game:
         else:
             Effects().place_soft.play(maxtime=200) 
     def score_multiplier_tick(self):
-        self.score_mult_buffer -= self.score_multiplier * MULT_BUFFER_DRAIN_COEFFICIENT / FPS
+        self.score_mult_buffer -= self.score_multiplier**PLACEMENT_LENIENCY_SCALE_EXPONENT * MULT_BUFFER_DRAIN_COEFFICIENT / FPS
         if self.score_mult_buffer < 0:
             self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
             self.score_mult_buffer = 0
@@ -476,7 +479,7 @@ class Game:
                 cube_placements_found = 0
                 for n in range(len(rotated_piece["cubes"])):
                     cube = rotated_piece["cubes"][n]
-                    if (not self.check_for_collision(cube, x, y, z)) and not (not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2]+z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                    if (self.check_for_collision(cube, x, y, z), (0 <= cube[0]+x <= WIDTH-1), (0 <= cube[1]+y <= DEPTH-1), (cube[2]+z-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                         cube_placements_found += 1
                 if cube_placements_found == len(rotated_piece["cubes"]):
                     original_cubes_touched = [] # made into all cubes the unrotated piece has touched
