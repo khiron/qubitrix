@@ -566,7 +566,7 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
         floor_coordinates = []
         for n in range(4):
             rot = n + game.visual_grid_rotation
-            x_a = (WIDTH, DEPTH)[n%2]/2*math.cos(rot*math.pi/2) + (DEPTH, WIDTH)[n%2]/2*math.sin(rot*math.pi/2)
+            x_a = (WIDTH, DEPTH)[n%2]/2*math.cos(rot*math.pi/2) + (DEPTH, WIDTH)[n%2]/2*math.sin(rot*math.pi/2) # the positions of the four corners of each of the grid's outer faces
             y_a = (DEPTH, WIDTH)[n%2]/2*math.cos(rot*math.pi/2) - (WIDTH, DEPTH)[n%2]/2*math.sin(rot*math.pi/2)+Y_CAMERA_DISTANCE
             rot += 1
             x_b = (DEPTH, WIDTH)[n%2]/2*math.cos(rot*math.pi/2) + (WIDTH, DEPTH)[n%2]/2*math.sin(rot*math.pi/2)
@@ -579,14 +579,15 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
             [screen_coordinates(*floor_coordinates[0]), screen_coordinates(*floor_coordinates[1]), screen_coordinates(*floor_coordinates[2]), screen_coordinates(*floor_coordinates[3])], width = GHOST_BORDER_WIDTH*4 if border else 0)
     # to do: fix the missing corners of the game grid's border
     for border in (False, True): # border rendering for rects is on the inside for some reason
-        pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
-        pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT*0.325, WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
+        for side in range(2): # render the UI rectangles and borders on each side of the grid
+            pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2*(1 if side == 0 else -1) + WINDOW_HEIGHT*(0.04 if side == 0 else -0.325), WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
 
-    pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, WINDOW_HEIGHT*0.58)) # level progress bar
     level_progress = (game.plane_clear_level_progress-get_level_requirement(game.level-1))/(get_level_requirement(game.level)-get_level_requirement(game.level-1)) # proportion of plane clears gained towards the next level
-    pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, level_progress*WINDOW_HEIGHT*0.58))
-    pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178, WINDOW_HEIGHT/36)) # score multiplier bar
-    pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178*game.score_mult_buffer/MULT_BUFFER_SIZE, WINDOW_HEIGHT/36))
+    for (color, x_from_edge, y, width, height) in [(9, WINDOW_HEIGHT/5, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT/36, WINDOW_HEIGHT*0.58), # draw each bar's full area, and then how much of it is filled - level for elements 1-2, score for elements 3-4
+        (-3, WINDOW_HEIGHT/5, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT/36, level_progress*WINDOW_HEIGHT*0.58),
+        (9, WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178, WINDOW_HEIGHT/36),
+        (-3, WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178*game.score_mult_buffer/MULT_BUFFER_SIZE, WINDOW_HEIGHT/36)]:
+        pygame.draw.rect(screen, COLORS[color], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+x_from_edge, y, width, height))
     score_text = font_large.render(f"{math.floor(game.score):06d}", False, COLORS[-3])
     screen.blit(score_text, (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.82))
     level_text = font_small.render("Level " + str(game.level), False, COLORS[-3])
@@ -676,11 +677,8 @@ def render_cubes(screen, cubes_to_render, rot, next_pos=0, hold_position=False):
         closest_vertex = vertex_distances.index(min(vertex_distances))
         near_vertices = [closest_vertex^1, closest_vertex^2, closest_vertex^4] # XOR with 1, 2, 4 to get the nearby vertices
         far_vertices = [closest_vertex^6, closest_vertex^5, closest_vertex^3] # XOR with 6, 5, 3 to get the vertices further away (but not polar opposites)
-        polygons_to_draw = [
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[0]]), screen_coordinates(*cube_vertices[far_vertices[2]]), screen_coordinates(*cube_vertices[near_vertices[1]])],
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[0]]), screen_coordinates(*cube_vertices[far_vertices[1]]), screen_coordinates(*cube_vertices[near_vertices[2]])],
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[1]]), screen_coordinates(*cube_vertices[far_vertices[0]]), screen_coordinates(*cube_vertices[near_vertices[2]])] # big and clunky, should probably be reworked
-        ] # since there is no drawing priority here, sometimes **very** slight polygon clipping can occur, though it's practically unnoticeable so I can't be bothered to fix it - also the top always gets rendered last
+        polygons_to_draw = [[screen_coordinates(*cube_vertices[vertex]) for vertex in [closest_vertex, near_vertices[[0, 0, 1][m]], far_vertices[[2, 1, 0][m]], near_vertices[[1, 2, 2][m]]]] for m in range(3)] 
+        # since there is no drawing priority here, sometimes **very** slight polygon clipping can occur, though it's practically unnoticeable so I can't be bothered to fix it - also the top always gets rendered last
         if not RENDER_CUBES:
             pygame.draw.circle(screen, COLORS[id], screen_coordinates(x, y, z), (x**2+y**2+z**2)**0.5/3, width=5) # in case drawing cubes gets unreasonably laggy
         if RENDER_CUBES:
