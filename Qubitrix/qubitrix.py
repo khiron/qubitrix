@@ -45,6 +45,7 @@ SPIN_CLEAR_SCORE_FACTOR = 3 # multiply the above bonuses by this amount for spin
 PLANE_CLEAR_MULT_BONUSES = (0, 0.15, 0.32, 0.5, 0.7) # for 0-4 planes
 SPIN_CLEAR_MULT_FACTOR = 2 # multiply the above bonuses by this amount for spin clears
 MAXIMUM_SELECTABLE_LEVEL = 40
+SELECTABLE_LEVEL_GRID_WIDTH = 10
 BASE_LEVEL_CLEAR_REQ = 4 # How many plane clears it takes to increment the level counter from level 1
 STAGE_LENGTH = 4 # How many levels are required to shift the color palette and increase the plane clear requirement by 1
 TICK_DURATION_SCALE_EXPONENT = 1.25
@@ -91,8 +92,7 @@ class Game:
         Effects().load_all_sounds() # preload all wav files into the Effects manager
     def change_initial_level(self, amount):
         self.initial_level += amount
-        self.initial_level = max(self.initial_level, 1)
-        self.initial_level = min(self.initial_level, MAXIMUM_SELECTABLE_LEVEL)
+        self.initial_level = min(max(self.initial_level, 1), MAXIMUM_SELECTABLE_LEVEL)
     def increase_score(self, points):
         self.score += points * self.score_multiplier
     def check_for_level_increase(self):
@@ -552,9 +552,15 @@ class Game:
 def draw_home_ui(screen, game, font_small, font_large):
     title_text = font_large.render(("QUBITRIX"), False, COLORS[-3])
     screen.blit(title_text, title_text.get_rect(center=(WINDOW_WIDTH/2, WINDOW_HEIGHT*0.2)))
-    start_text = font_small.render((f"Start at level < {game.initial_level} >"), False, COLORS[-3])
-    screen.blit(start_text, start_text.get_rect(center=(WINDOW_WIDTH/2, WINDOW_HEIGHT*0.6)))
-
+    for level in range(1, MAXIMUM_SELECTABLE_LEVEL+1):
+        x = WINDOW_WIDTH/2 - WINDOW_HEIGHT*SELECTABLE_LEVEL_GRID_WIDTH/20 + ((level-1)%SELECTABLE_LEVEL_GRID_WIDTH+0.1)*WINDOW_HEIGHT*0.1
+        y = (level-1)//SELECTABLE_LEVEL_GRID_WIDTH*WINDOW_HEIGHT*0.1 + WINDOW_HEIGHT*0.4
+        pygame.draw.rect(screen, UI_COLORS[min(math.ceil(level/STAGE_LENGTH), 9)] if (level != game.initial_level) else COLORS[-2], (x, y, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT*0.08))
+        level_text = font_small.render(f"{level:02d}", False, COLORS[-3] if (level != game.initial_level) else UI_COLORS[min(math.ceil(level/STAGE_LENGTH), 9)])
+        level_text_rect = level_text.get_rect()
+        level_text_rect.center = (x+WINDOW_HEIGHT*0.042, y+WINDOW_HEIGHT*0.045)
+        screen.blit(level_text, level_text_rect)
+        
 
 def screen_coordinates(x, y, z):
     return WINDOW_WIDTH/2+DEPTH_LEVEL*x*WINDOW_WIDTH/y, DEPTH_LEVEL*z*WINDOW_WIDTH/y
@@ -809,7 +815,7 @@ def controller_input_check(controller, controller_button_states, controller_anal
                     game.init_game()
                 case _:
                     if input < 4:
-                        game.change_initial_level((1, 10, -1, -10)[input])
+                        game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
             controller_button_states[input] = True
     for input, axis, dir in (0, 0, 1), (1, 1, -1), (2, 0, -1), (3, 1, 1), (4, 2, -1), (5, 2, 1), (8, 4, 1): # to do: add other controller support here. analog controls only for the first 6 inputs and the hold input currently
         if controller.get_axis(axis) * dir < ANALOG_DEADZONE_WIDTH and controller_analog_states[input]: # button release when it is currently held
@@ -834,7 +840,7 @@ def controller_input_check(controller, controller_button_states, controller_anal
                     game.init_game()
                 case _:
                     if input < 4:
-                        game.change_initial_level((1, 10, -1, -10)[input])
+                        game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
             controller_analog_states[input] = True
 
 def keyboard_input_check(event, game):
@@ -881,7 +887,7 @@ def keyboard_input_check(event, game):
                                 game.init_game()
                             case _:
                                 if input < 4:
-                                    game.change_initial_level((1, 10, -1, -10)[input])
+                                    game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
         except ValueError:
             pass
 
