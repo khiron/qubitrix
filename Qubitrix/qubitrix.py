@@ -2,11 +2,13 @@ import pygame
 import sys
 import random
 import math
-from copy import deepcopy # because I can't just make a simple copy of a dict
+from copy import deepcopy
 from pygame.locals import QUIT, KEYDOWN, KEYUP
 
 from fonts import get_large_font, get_small_font
 from sounds import Effects
+from controllers.abstract_controller import AbstractController, GameEvent # type: ignore
+from controllers.keyboard_controller import KeyboardController
 
 WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 ASPECT_RATIO = WINDOW_WIDTH/WINDOW_HEIGHT
@@ -25,23 +27,36 @@ PIECES = [ # tetracubes, float (half) values will have to be converted to int.
 ]
 COLORS = [(0, 0, 0), (200, 40, 20), (220, 120, 40), (220, 240, 60), (60, 220, 40), (20, 180, 220), (40, 80, 240), (100, 40, 220), (180, 20, 240), (120, 120, 120), (255, 160, 140), (10, 20, 30), (255, 255, 255), (255, 240, 180), (0, 0, 0)]
 NEXT_PIECE_COUNT = 5
-Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55
-ALPHA_KEY_COLOR = (1, 1, 1) # transparent ghost (laggy, unused at the moment)
+Y_CAMERA_DISTANCE = HEIGHT*DEPTH_LEVEL*ASPECT_RATIO*1.55 # how far away the cubes appear to be
 BACKGROUND_COLORS = [tuple(COLORS[n][m]*0.35+40 for m in range(3)) for n in range(10)]
-UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # swap nearby colors
+UI_COLORS = [tuple(COLORS[n][m]*0.2+20 for m in range(3)) for n in (0, 2, 1, 4, 3, 6, 5, 8, 7, 9)] # nearby colors are swapped
 CUBE_VERTEX_OFFSET = 0.46 # the size of the cube divided by 2
-GHOST_BORDER_WIDTH = int(WINDOW_HEIGHT/360)
-RENDER_CUBES = True
+GHOST_BORDER_WIDTH = int(WINDOW_HEIGHT/360) # width of ghost pieces' and secluded spaces' borders
+RENDER_CUBES = True # otherwise renders circles as a placeholder
 VISUAL_GRID_ROT_EASING = 12/FPS
 GAME_OVER_SCREEN_ANIM_TIME = 0.5 # in seconds
 ANALOG_DEADZONE_WIDTH = 0.55 # setting this above 0.7 will make diagonals impossible
-MULT_BUFFER_DRAIN_COEFFICIENT = 0.03
-MULT_DRAIN_COEFFICIENT = 1.8
-MULT_BUFFER_SIZE = 0.4
-RENDER_CENTERS = False
+MULT_BUFFER_DRAIN_COEFFICIENT = 0.014 # affects the speed at which the multiplier buffer drains
+MULT_DRAIN_COEFFICIENT = 1.8 # affects the speed at which the multiplier itself drains with an empty buffer
+MULT_BUFFER_SIZE = 0.4 # how much score multiplier is required to fill or drain the bar fully
+RENDER_CENTERS = False # used for determining what a piece is rotating around
+PLANE_CLEAR_SCORE_BONUSES = (0, 100, 250, 500, 1000) # for 0-4 planes
+SPIN_CLEAR_SCORE_FACTOR = 3 # multiply the above bonuses by this amount for spin clears
+PLANE_CLEAR_MULT_BONUSES = (0, 0.15, 0.32, 0.5, 0.7) # for 0-4 planes
+SPIN_CLEAR_MULT_FACTOR = 2 # multiply the above bonuses by this amount for spin clears
+MAXIMUM_SELECTABLE_LEVEL = 40
+SELECTABLE_LEVEL_GRID_WIDTH = 10
+BASE_LEVEL_CLEAR_REQ = 4 # How many plane clears it takes to increment the level counter from level 1
+STAGE_LENGTH = 4 # How many levels are required to shift the color palette and increase the plane clear requirement by 1
+TICK_DURATION_SCALE_EXPONENT = 1.25
+PLACEMENT_LENIENCY_SCALE_EXPONENT = 0.42
+SECLUDED_SPACE_MERCY_COEFFICIENT = 0.04
 
 hotkeys = [7, 26, 4, 22, 14, 15, 44, 225, 51, 41] # d,w,a,s,k,l,space,lshift,semicolon,esc by default. to do: add settings for this
 controller_bindings = [14, 11, 13, 12, 2, 1, 0, 9, 3, 15, 10] # see above, but index 10 is for an alternate lower button
+
+def get_level_requirement(level):
+    return math.ceil((level)*(BASE_LEVEL_CLEAR_REQ-0.5+0.5*(level)/STAGE_LENGTH))
 
 class Game:
     def __init__(self):
@@ -55,11 +70,12 @@ class Game:
         self.mode = "Playing"
         self.score = 0
         self.total_planes_cleared = 0
-        self.plane_clear_level_progress = math.ceil((self.initial_level-1)*(3.5+0.125*(self.initial_level-1)))
+        self.plane_clear_level_progress = get_level_requirement(self.initial_level-1)
         self.total_plane_clear_types = [0, 0, 0, 0]
         self.total_spin_clear_types = [0, 0, 0]
         self.total_spins = 0
         self.secluded_spaces = 0
+        self.level = self.initial_level
         self.check_for_level_increase()
         self.score_multiplier = 1.0
         self.highest_score_multiplier = 1.0
@@ -74,24 +90,14 @@ class Game:
         self.game_over_screen_time = 0
     def init_sounds(self):
         Effects().load_all_sounds() # preload all wav files into the Effects manager
-        # wav files loaded but not used 
-        # '1_plane_clear.wav'
-        # '2_plane_clear.wav'
-        # '3_plane_clear.wav'
-        # '4_plane_clear.wav'
-        # '1_spin_clear.wav'
-        # '2_spin_clear.wav'
-        # '3_spin_clear.wav'
     def change_initial_level(self, amount):
         self.initial_level += amount
-        if self.initial_level < 1:
-            self.initial_level = 1
-        elif self.initial_level > 40:
-            self.initial_level = 40
+        self.initial_level = min(max(self.initial_level, 1), MAXIMUM_SELECTABLE_LEVEL)
     def increase_score(self, points):
         self.score += points * self.score_multiplier
     def check_for_level_increase(self):
-        self.level = math.floor((8*self.plane_clear_level_progress+196)**0.5) - 13 # level scaling. to do: reintroduce constants
+        while self.plane_clear_level_progress >= get_level_requirement(self.level):
+            self.level += 1
         self.score_mult_cap = 1.0 + self.level/5
         self.refresh_tickspeed()
     def score_mult_bonus(self, amount):
@@ -99,78 +105,64 @@ class Game:
         if self.score_mult_buffer > MULT_BUFFER_SIZE:
             self.score_multiplier += self.score_mult_buffer - MULT_BUFFER_SIZE
             self.score_mult_buffer = MULT_BUFFER_SIZE
-            if self.score_multiplier > self.score_mult_cap:
-                self.score_multiplier = self.score_mult_cap
-        if self.highest_score_multiplier < self.score_multiplier:
-            self.highest_score_multiplier = self.score_multiplier
+            self.score_multiplier = min(self.score_multiplier, self.score_mult_cap)
+        self.highest_score_multiplier = max(self.highest_score_multiplier, self.score_multiplier)
     def refresh_tickspeed(self):
-        self.tick_duration = FPS/(1.5*((2+self.level)/3)**1.25)*(1+self.secluded_spaces/25) # show mercy when there is a large number of secluded spaces to fill
-        self.placement_leniency = FPS/(1.5*((2+self.level)/3)**1.25) * self.level**0.75
+        self.tick_duration = FPS/(1.5*((2+self.level)/3)**TICK_DURATION_SCALE_EXPONENT)*(1+self.secluded_spaces*SECLUDED_SPACE_MERCY_COEFFICIENT) # show mercy when there is a large number of secluded spaces to fill
+        self.placement_leniency = FPS/(1.5*((2+self.level)/3)**PLACEMENT_LENIENCY_SCALE_EXPONENT)
         self.repeat_input_times = [ # faster for soft dropping and slower for other inputs
             *[min(FPS/7.5, self.placement_leniency/4)]*6, # d,w,a,s,k,l
             min(FPS/20, self.tick_duration/2) # space
         ]
-        self.score_mult_drain = MULT_BUFFER_DRAIN_COEFFICIENT/(DEPTH*FPS/(1.5*((2+self.level)/3)**1.25) + self.placement_leniency)
-    def get_new_piece(self):
+    def load_upcoming_pieces(self):
+        while len(self.next_pieces) <= NEXT_PIECE_COUNT:
+            piece_bag = PIECES + [PIECES[random.randrange(0, 7)]] # adds a "bag" of a set of pieces with an extra random piece to come next
+            random.shuffle(piece_bag)
+            self.next_pieces.extend(piece_bag)
+    def reset_piece_state(self):
         self.tick_time = 0
         self.place_time = 0
         self.in_hard_drop = False
-        while True:
-            if len(self.next_pieces) <= NEXT_PIECE_COUNT:
-                piece_bag = PIECES*2 # repeated list
-                random.shuffle(piece_bag)
-                self.next_pieces.extend(piece_bag) # adds a "bag" of 2 sets of pieces to come next
-            else:
-                break
-        self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
         self.lowest_center_elevation = self.current_piece["centers"][0][2]
         self.lowest_spin_elevation = self.current_piece["centers"][0][2]
         self.piece_spin_on_last_movement = False
+        self.get_ghost_piece()
+    def get_new_piece(self):
+        self.load_upcoming_pieces()
+        self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
         self.hold_piece_used = False
         self.get_secluded_spaces()
-        self.get_ghost_piece()
+        self.reset_piece_state()
     def hold_piece(self):
         if not self.hold_piece_used: # only if it is not already used this turn
             self.hold_piece_used = True
             current_piece_index = self.current_piece["id"] - 1 # for indexing in the PIECES list
             self.current_piece = self.held_piece
             self.held_piece = deepcopy(PIECES[current_piece_index])
-            if not self.current_piece: # empty dict. to do: remove the stupid amount of code here pasted from other identical parts of the progarm
-                while True:
-                    if len(self.next_pieces) <= NEXT_PIECE_COUNT:
-                        piece_bag = PIECES*2 # repeated list
-                        random.shuffle(piece_bag)
-                        self.next_pieces.extend(piece_bag) # adds a "bag" of 2 sets of pieces to come next
-                    else:
-                        break
+            if not self.current_piece: # empty dict
+                self.load_upcoming_pieces()
                 self.current_piece = deepcopy(self.next_pieces.pop(0)) # get the first piece in the queue
-            self.tick_time = 0
-            self.place_time = 0
-            self.in_hard_drop = False
-            self.lowest_center_elevation = self.current_piece["centers"][0][2]
-            self.lowest_spin_elevation = self.current_piece["centers"][0][2]
-            self.piece_spin_on_last_movement = False
-            self.get_ghost_piece()
+            self.reset_piece_state()
             Effects().hold_piece.play(maxtime=300) # play the sound effect for holding the piece
     def clear_planes(self):
         planes_cleared = 0
-        for z in range(HEIGHT):
+        for z in range(HEIGHT): # for each horizontal plane
             cubes = 0
             for y in range(DEPTH):
                 for x in range(WIDTH):
                     if self.grid[x][y][z] > 0:
-                        cubes += 1
-            if cubes == DEPTH*WIDTH:
+                        cubes += 1 # count the number of cubes in that plane
+            if cubes == DEPTH*WIDTH: # if the plane is full
                 planes_cleared += 1
                 for y in range(DEPTH):
                     for x in range(WIDTH):
-                        self.grid[x][y].pop(z) # remove the space
-                        self.grid[x][y].insert(0, 0) # insert an empty space at the top
-        self.increase_score((0, 100, 250, 500, 1000)[min(planes_cleared, 4)] * (3 if self.piece_spin_on_last_movement else 1))
+                        self.grid[x][y].pop(z) # remove the plane
+                        self.grid[x][y].insert(0, 0) # insert an empty plane at the top
+        self.increase_score(PLANE_CLEAR_SCORE_BONUSES[min(planes_cleared, 4)] * (SPIN_CLEAR_SCORE_FACTOR if self.piece_spin_on_last_movement else 1))
         self.total_planes_cleared += planes_cleared
         self.plane_clear_level_progress += planes_cleared
         self.check_for_level_increase()
-        self.score_mult_bonus((0, 0.15, 0.32, 0.5, 0.7)[min(planes_cleared, 4)] * (2 if self.piece_spin_on_last_movement else 1))
+        self.score_mult_bonus(PLANE_CLEAR_MULT_BONUSES[min(planes_cleared, 4)] * (SPIN_CLEAR_MULT_FACTOR if self.piece_spin_on_last_movement else 1))
         if (planes_cleared > 0) and (type(planes_cleared) == int): # ensure that only integers may be used in the eval() functions
             if not self.piece_spin_on_last_movement:
                 eval(f"Effects()['{min(planes_cleared, 4)}_plane_clear'].play(maxtime=1000)")
@@ -181,59 +173,33 @@ class Game:
         return planes_cleared
     def get_secluded_spaces(self):
         self.secluded_spaces = 0 # this could just be a returned variable, perhaps modify?
-        full_depths = []
+        visible_depths = [[[0 for _ in range(DEPTH if rot%2 else WIDTH)] for _ in range(HEIGHT)] for rot in range(4)] # Indexing: [Face rotation (in the order below)][z][x or y, depending on face - this is "a" in the below code]
+        # The below function provides how deep empty spaces go in each row from 4 perspectives relative to the default grid rotation:
+        # Front face, left face (but flipped horizontally for later code to easily index cells), back face (also flipped), right face
         for rot in range(4):
-            face_depths = []
             for z in range(HEIGHT):
-                plane_depths = []
-                for a in range(DEPTH if rot%2 else WIDTH): # swaps indexing of X and Y axes if rotation is odd
-                    while True:
-                        depth = 0
-                        for b in range(WIDTH if rot%2 else DEPTH): # b's indexing is inverted if rot >= 2
-                            match rot:
-                                case 0:
-                                    if self.grid[a][b][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 1:
-                                    if self.grid[b][a][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 2:
-                                    if self.grid[a][DEPTH-b-1][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break
-                                case 3:
-                                    if self.grid[WIDTH-b-1][a][z] <= 0:
-                                        depth += 1
-                                    else:
-                                        break # to do: make less clunky?
-                        break
-                    plane_depths.append(depth)
-                face_depths.append(plane_depths)
+                for a in range(DEPTH if rot%2 else WIDTH): # Swaps indexing of X and Y axes if rotation is odd
+                    depth = 0
+                    for b in range(WIDTH if rot%2 else DEPTH): # b's indexing is inverted if rot >= 2
+                        if self.grid[(a, b, a, WIDTH-b-1)[rot]][(b, a, DEPTH-b-1, a)[rot]][z] <= 0: # Index based on the order of faces listed above
+                            depth += 1
+                        else:
+                            break
+                    visible_depths[rot][z][a] = depth
             for z in range(HEIGHT-1): # excluding topmost layer, done from bottom to top
                 for a in range(DEPTH if rot%2 else WIDTH):
-                    if face_depths[HEIGHT-z-1][a] < face_depths[HEIGHT-z-2][a]: # if the lower row has a lesser depth than the upper row
-                        face_depths[HEIGHT-z-1][a] = face_depths[HEIGHT-z-2][a] - 1 # set the lower row to the upper row's value minus one, as it is visible from the top
-            full_depths.append(face_depths)
+                    if visible_depths[rot][HEIGHT-z-1][a] < visible_depths[rot][HEIGHT-z-2][a]: # If the lower row has a lesser depth than the upper row...
+                        visible_depths[rot][HEIGHT-z-1][a] = visible_depths[rot][HEIGHT-z-2][a] - 1 # set the lower row to the upper row's value minus one, as it is visible that far from the top.
         for z in range(HEIGHT-1): # topmost plane (z=0) cannot be secluded, thus z+1 will be used
             for y in range(DEPTH):
                 for x in range(WIDTH):
-                    if self.grid[x][y][z+1] <= 0:
+                    if self.grid[x][y][z+1] <= 0: # For every empty cube in the grid
                         secluded_directions = 0
-                        if full_depths[0][z+1][x] < y: # if the visible depth is less than the depth of the cube in a given direction, it is secluded in that direction
-                            secluded_directions += 1
-                        if full_depths[1][z+1][y] < x:
-                            secluded_directions += 1
-                        if full_depths[2][z+1][x] < DEPTH-y-1:
-                            secluded_directions += 1
-                        if full_depths[3][z+1][y] < WIDTH-x-1:
-                            secluded_directions += 1
+                        for dir in range(4): # for each of the 4 directions - while this may be a lot of checks, for typical board sizes this takes less than 1ms on a typical system. Even on lower-end systems, this should not cause considerable lag compared to that of rendering.
+                            if visible_depths[dir][z+1][y if dir%2 else x] < (y, x, DEPTH-y-1, WIDTH-x-1)[dir]:
+                                secluded_directions += 1 # If the visible depth is less than the depth of the cube in a given direction, it is secluded in that direction.
                         if secluded_directions >= 3:
-                            self.grid[x][y][z+1] = -1
+                            self.grid[x][y][z+1] = -1 # secluded spaces in the game grid have an ID of -1
                             self.secluded_spaces += 1
     def check_piece_elevation(self):
         if self.current_piece["centers"][0][2] > self.lowest_center_elevation:
@@ -250,8 +216,7 @@ class Game:
                 if self.current_piece["centers"][0][2] > self.lowest_center_elevation:
                     self.increase_score(1) # increase score for manual lowering if enough time is saved (and it was not a previously reached depth this turn)
             self.tick_time -= self.tick_duration
-            if self.tick_time < 0:
-                self.tick_time = 0
+            self.tick_time = max(self.tick_time, 0)
         if manual:
             Effects().lower_piece.play(maxtime=100) # play the sound effect for manually lowering the piece
         self.check_piece_elevation()
@@ -280,6 +245,12 @@ class Game:
             Effects().place_hard.play(maxtime=300) # play the sound effect for hard dropping the piece
         else:
             Effects().place_soft.play(maxtime=200) 
+    def score_multiplier_tick(self):
+        self.score_mult_buffer -= self.score_multiplier**PLACEMENT_LENIENCY_SCALE_EXPONENT * MULT_BUFFER_DRAIN_COEFFICIENT / FPS
+        if self.score_mult_buffer < 0:
+            self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
+            self.score_mult_buffer = 0
+            self.score_multiplier = max(self.score_multiplier, 1)
     def tick(self):
         for n in range(len(self.key_hold_times)):
             if self.key_hold_times[n] > 0:
@@ -290,21 +261,13 @@ class Game:
                     self.basic_input(n, repeat=True)
                 elif n != 6: # excludes holding down hard drop
                     self.modified_input(n)
-        self.score_mult_buffer -= self.score_mult_drain
-        if self.score_mult_buffer < 0:
-            self.score_multiplier += self.score_mult_buffer * MULT_DRAIN_COEFFICIENT * self.score_multiplier
-            self.score_mult_buffer = 0
-            if self.score_multiplier < 1:
-                self.score_multiplier = 1
+        self.score_multiplier_tick()
         if not self.piece_grounded(self.current_piece):
             self.tick_time += 1
         else:
             self.place_time += 1
-        while True:
-            if (self.tick_time >= self.tick_duration) and not self.piece_grounded(self.current_piece):
-                self.lower_piece(self.current_piece)
-            else:
-                break
+        while (self.tick_time >= self.tick_duration) and not self.piece_grounded(self.current_piece):
+            self.lower_piece(self.current_piece)
         if (self.place_time >= self.tick_duration + self.placement_leniency) and self.piece_grounded(self.current_piece):
             self.place_piece()
         if self.in_hard_drop == True:
@@ -348,10 +311,7 @@ class Game:
         return False
     def move_piece(self, piece, rot):
         self.piece_spin_on_last_movement = False
-        x = [1, 0, -1, 0][(rot+self.grid_rotation)%4]
-        y = [0, 1, 0, -1][(rot+self.grid_rotation)%4] # get the movement in each axis based on the input and current grid rotation
-        # x_modified = int(round(x*math.cos(self.grid_rotation*math.pi/2)-y*math.sin(self.grid_rotation*math.pi/2)))
-        # y_modified = int(round(y*math.cos(self.grid_rotation*math.pi/2)+x*math.sin(self.grid_rotation*math.pi/2))) # modify x and y movements with grid rotation. also the + and - here have to be swapped, or movement inverts itself for odd rotations I guess
+        x, y = [1, 0, -1, 0][(rot+self.grid_rotation)%4], [0, 1, 0, -1][(rot+self.grid_rotation)%4] # get the movement in each axis based on the input and current grid rotation
         for n in range(len(piece["cubes"])):
             cube = piece["cubes"][n]
             if not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2] <= HEIGHT-1): # if outside at least one of the boundaries
@@ -359,11 +319,9 @@ class Game:
             if self.check_for_collision(cube, x, y, 0): # collisions with tiles in-bounds
                 return False
         for n in range(len(piece["cubes"])):
-            piece["cubes"][n][0] += x
-            piece["cubes"][n][1] += y # move the piece
+            piece["cubes"][n] = [piece["cubes"][n][axis] + [x, y, 0][axis] for axis in range(3)] # move the piece
         for n in range(len(piece["centers"])):
-            piece["centers"][n][0] += x
-            piece["centers"][n][1] += y # move the rotation center
+            piece["centers"][n] = [piece["centers"][n][axis] + [x, y, 0][axis] for axis in range(3)] # move all of the possible rotation centers
         self.get_ghost_piece()
         if self.piece_fully_grounded(self.ghost_piece):
             Effects().move_piece_gold.play(maxtime=300) # play the sound effect for moving the piece if it is fully grounded
@@ -372,13 +330,9 @@ class Game:
         return True
     def force_move_piece(self, piece, x, y, z): # absolute positioning, no collision checking 
         for n in range(len(piece["cubes"])):
-            piece["cubes"][n][0] += x
-            piece["cubes"][n][1] += y # move the piece
-            piece["cubes"][n][2] += z
+            piece["cubes"][n] = [piece["cubes"][n][axis] + [x, y, z][axis] for axis in range(3)] # move the piece
         for n in range(len(piece["centers"])):
-            piece["centers"][n][0] += x
-            piece["centers"][n][1] += y # move all of the possible rotation centers
-            piece["centers"][n][2] += z
+            piece["centers"][n] = [piece["centers"][n][axis] + [x, y, z][axis] for axis in range(3)] # move all of the possible rotation centers
         self.check_piece_elevation()
     def drop_piece(self, instant_placement=False):
         while True:
@@ -393,29 +347,25 @@ class Game:
             cube_placements_found = 0
             for n in range(len(modified_piece["cubes"])):
                 cube = modified_piece["cubes"][n]
-                if (not self.check_for_collision(cube, 0, 0, -1)) and not (not (0 <= cube[0] <= WIDTH-1) or not (0 <= cube[1] <= DEPTH-1) or not (cube[2]-1 <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving upwards
+                if (self.check_for_collision(cube, 0, 0, -1), (0 <= cube[0] <= WIDTH-1), (0 <= cube[1] <= DEPTH-1), (cube[2]-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving upwards
                     cube_placements_found += 1
             if cube_placements_found == len(modified_piece["cubes"]):
                 self.force_move_piece(modified_piece, 0, 0, -1)
             else:
                 return # no further checks given
-    def detect_spin(self, modified_piece, axis): # where axis refers to the pole which the piece is rotated around
-        spin_check_displacements = [(0, 0, -1)] # upward check
-        if axis != 0: # left/right or cw/ccw rotations
-            spin_check_displacements.extend([(0, 1, 0), (0, -1, 0)]) # check for the piece being movable in the forward/backward directions
-        if axis != 1: # forward/backward or cw/ccw rotations
-            spin_check_displacements.extend([(1, 0, 0), (-1, 0, 0)]) # check for the piece being movable in the left/right directions
+    def detect_spin(self, modified_piece):
+        spin_check_displacements = [(0, 0, -1), (0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0)] # The piece can only be movable downwards in its rotation to have a spin detected.
         for relative_x, relative_y, relative_z in spin_check_displacements:
             cube_placements_found = 0
             for n in range(len(modified_piece["cubes"])):
                 cube = modified_piece["cubes"][n]
-                if (not self.check_for_collision(cube, relative_x, relative_y, relative_z)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                     cube_placements_found += 1
             if cube_placements_found == len(modified_piece["cubes"]):
                 return # the piece should not be movable in any of the given directions - otherwise, it is not considered a spin
         if self.current_piece["centers"][0][2] > self.lowest_spin_elevation: # only if the spin as at a lower point than the last spin this turn (prevents repeated point gain)
             self.lowest_spin_elevation = self.current_piece["centers"][0][2]
-            final_spin_displacement = abs(self.current_piece["centers"][0][0]-modified_piece["centers"][0][0])+abs(self.current_piece["centers"][0][1]-modified_piece["centers"][0][1])+abs(self.current_piece["centers"][0][2]-modified_piece["centers"][0][2])
+            final_spin_displacement = sum((abs(self.current_piece["centers"][0][axis]-modified_piece["centers"][0][axis]) for axis in range(3)))
             self.increase_score(20+10*final_spin_displacement)
             self.score_mult_bonus(0.14+0.07*final_spin_displacement)
             self.piece_spin_on_last_movement = True
@@ -428,6 +378,15 @@ class Game:
                 self.lower_piece(self.ghost_piece, tick_modification=False)
             else:
                 return
+    def commit_piece_rotation(self, modified_piece):
+        self.raise_piece_to_initial_center(modified_piece)
+        self.detect_spin(modified_piece)
+        self.current_piece = modified_piece
+        self.get_ghost_piece()
+        if self.piece_fully_grounded(self.ghost_piece):
+            Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
+        else:
+            Effects().rotate_piece.play(maxtime=200) # play the sound effect for rotating the piece
     def rotate_piece(self, input):
         self.piece_spin_on_last_movement = False
         if input < 4:
@@ -441,26 +400,16 @@ class Game:
             elif (input < 4): # second priority check: whichever center point is closest to the movement direction
                 self.current_piece["centers"] = sorted(self.current_piece["centers"], key=lambda position: position[input%2] * (-1 if input < 2 else 1))
         rotated_piece = deepcopy(self.current_piece)
-        for n in range(len(rotated_piece["cubes"])):
-            rotated_piece["cubes"][n][movable_axes[0]] -= rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["cubes"][n][movable_axes[1]] -= rotated_piece["centers"][0][movable_axes[1]] # make the cubes' relative centers (0,0) on the two movable axes
-            a = rotated_piece["cubes"][n][movable_axes[0]]
-            b = rotated_piece["cubes"][n][movable_axes[1]]
-            rotated_piece["cubes"][n][movable_axes[0]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2)
-            rotated_piece["cubes"][n][movable_axes[1]] = b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the cubes relative to the axis
-            rotated_piece["cubes"][n][movable_axes[0]] = int(round(rotated_piece["cubes"][n][movable_axes[0]] + rotated_piece["centers"][0][movable_axes[0]]))
-            rotated_piece["cubes"][n][movable_axes[1]] = int(round(rotated_piece["cubes"][n][movable_axes[1]] + rotated_piece["centers"][0][movable_axes[1]])) # move the cubes back to the axis's position, convert float to int
-        for n in range(len(rotated_piece["centers"])-1):
-            n = n+1 # start indexing for the alternate center (index 1)
-            rotated_piece["centers"][n][movable_axes[0]] -= rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["centers"][n][movable_axes[1]] -= rotated_piece["centers"][0][movable_axes[1]] # make the alternate center's relative centers (0,0) on the two movable axes
-            a = rotated_piece["centers"][n][movable_axes[0]]
-            b = rotated_piece["centers"][n][movable_axes[1]]
-            rotated_piece["centers"][n][movable_axes[0]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2)
-            rotated_piece["centers"][n][movable_axes[1]] = b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the center relative to the axis
-            rotated_piece["centers"][n][movable_axes[0]] = rotated_piece["centers"][n][movable_axes[0]] + rotated_piece["centers"][0][movable_axes[0]]
-            rotated_piece["centers"][n][movable_axes[1]] = rotated_piece["centers"][n][movable_axes[1]] + rotated_piece["centers"][0][movable_axes[1]] # move the alternate center back to the axis's position, convert float to int
-        rotation_success = False
+        for (attribute, set) in (("cubes", range(len(rotated_piece["cubes"]))), ("centers", range(len(rotated_piece["centers"]))[1:])): # start indexing from the alternate centers (index 1 onwards)
+            for n in set:
+                for movable_axis in movable_axes:
+                    rotated_piece[attribute][n][movable_axis] -= rotated_piece["centers"][0][movable_axis] # make the cubes' and alternate centers' relative centers (0,0) on the two movable axes
+                (a, b) = (rotated_piece[attribute][n][movable_axis] for movable_axis in movable_axes) # get the relative coordinates
+                rotated_piece[attribute][n][movable_axes[0]], rotated_piece[attribute][n][movable_axes[1]] = a*math.cos(rot*math.pi/2)+b*math.sin(rot*math.pi/2), b*math.cos(rot*math.pi/2)-a*math.sin(rot*math.pi/2) # rotate the cubes and centers relative to the axis
+                for movable_axis in movable_axes:
+                    rotated_piece[attribute][n][movable_axis] += rotated_piece["centers"][0][movable_axis] # move the cubes and alternate centers back to the axis's position
+                    if attribute == "cubes":
+                        rotated_piece[attribute][n][movable_axis] = round(rotated_piece[attribute][n][movable_axis]) # make sure the cubes' coordinates are integers (preventing floating point rounding errors)
         coordinate_ranges = []
         for n in range(3): # get how wide, deep, and tall the rotated piece is
             axis_positions = []
@@ -469,18 +418,16 @@ class Game:
             coordinate_ranges.append(axis_positions)
         for n in range(len(coordinate_ranges)):
             coordinate_ranges[n] = max(coordinate_ranges[n])-min(coordinate_ranges[n])+1 # actual range for each coordinate
-        for comparison, push_axis, movement in [(">= 0", 0, [1,0,0]), (">= 0", 1, [0,1,0]), ("<= WIDTH-1", 0, [-1,0,0]), ("<= DEPTH-1", 1, [0,-1,0])]: # evaluate the given code (pushing the piece out of the border) for each of the 4 conditions
-            exec(f"""
-while True:
-    for n in range(len(rotated_piece['cubes'])):
-        pushed = False
-        cube = rotated_piece['cubes'][n]
-        if not (cube[{push_axis}] {comparison}):
-            pushed = True
-            self.force_move_piece(rotated_piece, *{movement})
-    if not pushed:
-        break
-            """)
+        for invert_coordinates, border, push_axis, movement in [(True, 0, 0, [1,0,0]), (True, 0, 1, [0,1,0]), (False, WIDTH-1, 0, [-1,0,0]), (False, DEPTH-1, 1, [0,-1,0])]: # puch the piece out of meach of the 4 boundaries - first two checks have to be greater than or equal to 0, so the coordinate is inverted
+            while True:
+                for n in range(len(rotated_piece['cubes'])):
+                    pushed = False
+                    cube = rotated_piece['cubes'][n]
+                    if not (cube[push_axis] * (-1 if invert_coordinates else 1) <= border):
+                        pushed = True
+                        self.force_move_piece(rotated_piece, *movement)
+                if not pushed:
+                    break
         if not self.piece_held_by_overhang(self.current_piece): # special case for things such as t-spin triples
             for relative_z in (0, 1, -1): # correct downward first if initial position fails, then upward.
                 cube_placements_found = 0
@@ -499,7 +446,7 @@ while True:
                         upwards_special_case = -1
                     for n in range(len(rotated_piece["cubes"])):
                         cube = rotated_piece["cubes"][n]
-                        if (not self.check_for_collision(cube, relative_x, relative_y, relative_z)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                        if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                             cube_placements_found += 1
                         elif relative_z == -1:
                             if (abs(cube[0]-rotated_piece["centers"][0][0])+abs(cube[1]-rotated_piece["centers"][0][1])+(cube[2]-rotated_piece["centers"][0][2]) >= 2) and upwards_special_case >= 0: # special case for long/tall pieces pushing up against something. last coordinate is intentionally not an absolute value
@@ -508,67 +455,43 @@ while True:
                                 upwards_special_case = -1
                     if cube_placements_found == len(rotated_piece["cubes"]):
                         self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z)
-                        self.raise_piece_to_initial_center(rotated_piece)
-                        self.detect_spin(rotated_piece, axis)
-                        self.current_piece = rotated_piece
-                        rotation_success = True
-                        self.get_ghost_piece()
-                        if self.piece_fully_grounded(self.ghost_piece):
-                            Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                        else:
-                            Effects().rotate_piece.play(maxtime=200)
+                        self.commit_piece_rotation(rotated_piece)
                         return
                     elif upwards_special_case == 1:
                         cube_placements_found = 0
                         for n in range(len(rotated_piece["cubes"])):
                             cube = rotated_piece["cubes"][n]
-                            if (not self.check_for_collision(cube, relative_x, relative_y, relative_z-1)) and not (not (0 <= cube[0]+relative_x <= WIDTH-1) or not (0 <= cube[1]+relative_y <= DEPTH-1) or not (cube[2]+relative_z-1 <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
+                            if (self.check_for_collision(cube, relative_x, relative_y, relative_z), (0 <= cube[0]+relative_x <= WIDTH-1), (0 <= cube[1]+relative_y <= DEPTH-1), (cube[2]+relative_z-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
                                 cube_placements_found += 1
                         if cube_placements_found == len(rotated_piece["cubes"]):
                             self.force_move_piece(rotated_piece, relative_x, relative_y, relative_z-1)
-                            self.raise_piece_to_initial_center(rotated_piece)
-                            self.detect_spin(rotated_piece, axis)
-                            self.current_piece = rotated_piece
-                            rotation_success = True
-                            self.get_ghost_piece()
-                            if self.piece_fully_grounded(self.ghost_piece):
-                                Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                            else:
-                                Effects().rotate_piece.play(maxtime=200)
+                            self.commit_piece_rotation(rotated_piece)
                             return
-        if not rotation_success: # if the piece needs to be moved (to do: this rotation_success variable does nothing. maybe remove/rework it?)
-            horizontal_displacements = []
-            for y in range(-coordinate_ranges[1], coordinate_ranges[1]+1):
-                for x in range(-coordinate_ranges[0], coordinate_ranges[0]+1):
-                    horizontal_displacements.append([x, y])
-            preferred_displacement = [[0.001,-0.0001],[0.0001,0.001],[-0.001,0.0001],[-0.0001,-0.001]][input if input < 4 else (self.grid_rotation+1)%4] # displacements are checked for first in these positions based on the input given... (0.001 values are to prioritize [0,0] displacement forst, then in that direction; 0.0001 for a clockwise check thereafter) [and is set to to always correct backwards relative to the camera for cw/ccw rotations]
-            horizontal_displacements = sorted(horizontal_displacements, key=lambda displacement: ((displacement[0]-preferred_displacement[0])**2+(displacement[1]-preferred_displacement[1])**2)) # then by Euclidean distance between those positions
-            for z in range(-coordinate_ranges[2], coordinate_ranges[2]+1)[::-1]: # every value from the negative to the positive end of that value. Z axis (bottom to top) is done first            
-                for x, y in horizontal_displacements:
-                    cube_placements_found = 0
-                    for n in range(len(rotated_piece["cubes"])):
-                        cube = rotated_piece["cubes"][n]
-                        if (not self.check_for_collision(cube, x, y, z)) and not (not (0 <= cube[0]+x <= WIDTH-1) or not (0 <= cube[1]+y <= DEPTH-1) or not (cube[2]+z <= HEIGHT-1)): # if the cube is able to be placed and is within bounds after moving
-                            cube_placements_found += 1
-                    if cube_placements_found == len(rotated_piece["cubes"]):
-                        original_cubes_touched = [] # made into all cubes the unrotated piece has touched
-                        for n in range(len(self.current_piece["cubes"])):
-                            for dx, dy, dz in [(0,0,0), (1,0,0), (0,1,0), (0,0,1), (-1,0,0), (0,-1,0), (0,0,-1)]: # the cube and its adjacent neighbors
-                                original_cubes_touched.append([self.current_piece["cubes"][n][0]+dx, self.current_piece["cubes"][n][1]+dy, self.current_piece["cubes"][n][2]+dz])
-                        translated_piece = deepcopy(rotated_piece)
-                        self.force_move_piece(translated_piece, x, y, z)
-                        for m in range(len(rotated_piece["cubes"])):
-                            if translated_piece["cubes"][m] in original_cubes_touched: # if the current piece is in contact with the rotated and translated piece
-                                self.raise_piece_to_initial_center(translated_piece)
-                                self.detect_spin(translated_piece, axis)
-                                self.current_piece = translated_piece
-                                rotation_success = True
-                                self.get_ghost_piece()
-                                if self.piece_fully_grounded(self.ghost_piece):
-                                    Effects().rotate_piece_gold.play(maxtime=300) # play the sound effect for rotating the piece if it is fully grounded
-                                else:
-                                    Effects().rotate_piece.play(maxtime=200) # play the sound effect for rotating the piece
-                                return
+        # if the piece needs to be moved, and has not already returned in a valid position
+        horizontal_displacements = []
+        for y in range(-coordinate_ranges[1], coordinate_ranges[1]+1):
+            for x in range(-coordinate_ranges[0], coordinate_ranges[0]+1):
+                horizontal_displacements.append([x, y])
+        preferred_displacement = [[0.001,-0.0001],[0.0001,0.001],[-0.001,0.0001],[-0.0001,-0.001]][input if input < 4 else (self.grid_rotation+1)%4] # displacements are checked for first in these positions based on the input given... (0.001 values are to prioritize [0,0] displacement forst, then in that direction; 0.0001 for a clockwise check thereafter) [and is set to to always correct backwards relative to the camera for cw/ccw rotations]
+        horizontal_displacements = sorted(horizontal_displacements, key=lambda displacement: ((displacement[0]-preferred_displacement[0])**2+(displacement[1]-preferred_displacement[1])**2)) # then by Euclidean distance between those positions
+        for z in range(-coordinate_ranges[2], coordinate_ranges[2]+1)[::-1]: # every value from the negative to the positive end of that value. Z axis (bottom to top) is done first            
+            for x, y in horizontal_displacements:
+                cube_placements_found = 0
+                for n in range(len(rotated_piece["cubes"])):
+                    cube = rotated_piece["cubes"][n]
+                    if (self.check_for_collision(cube, x, y, z), (0 <= cube[0]+x <= WIDTH-1), (0 <= cube[1]+y <= DEPTH-1), (cube[2]+z-1 <= HEIGHT-1)) == (False, True, True, True): # if the cube is able to be placed and is within bounds after moving
+                        cube_placements_found += 1
+                if cube_placements_found == len(rotated_piece["cubes"]):
+                    original_cubes_touched = [] # made into all cubes the unrotated piece has touched
+                    for n in range(len(self.current_piece["cubes"])):
+                        for dx, dy, dz in [(0,0,0), (1,0,0), (0,1,0), (0,0,1), (-1,0,0), (0,-1,0), (0,0,-1)]: # the cube and its adjacent neighbors
+                            original_cubes_touched.append([self.current_piece["cubes"][n][0]+dx, self.current_piece["cubes"][n][1]+dy, self.current_piece["cubes"][n][2]+dz])
+                    translated_piece = deepcopy(rotated_piece)
+                    self.force_move_piece(translated_piece, x, y, z)
+                    for m in range(len(rotated_piece["cubes"])):
+                        if translated_piece["cubes"][m] in original_cubes_touched: # if the current piece is in contact with the rotated and translated piece
+                            self.commit_piece_rotation(translated_piece)
+                            return
         Effects().rotation_blocked.play(maxtime=400) # return statement cancels this
     def basic_input(self, input, repeat=False):
         match input:
@@ -629,9 +552,15 @@ while True:
 def draw_home_ui(screen, game, font_small, font_large):
     title_text = font_large.render(("QUBITRIX"), False, COLORS[-3])
     screen.blit(title_text, title_text.get_rect(center=(WINDOW_WIDTH/2, WINDOW_HEIGHT*0.2)))
-    start_text = font_small.render((f"Start at level < {game.initial_level} >"), False, COLORS[-3])
-    screen.blit(start_text, start_text.get_rect(center=(WINDOW_WIDTH/2, WINDOW_HEIGHT*0.6)))
-
+    for level in range(1, MAXIMUM_SELECTABLE_LEVEL+1):
+        x = WINDOW_WIDTH/2 - WINDOW_HEIGHT*SELECTABLE_LEVEL_GRID_WIDTH/20 + ((level-1)%SELECTABLE_LEVEL_GRID_WIDTH+0.1)*WINDOW_HEIGHT*0.1
+        y = (level-1)//SELECTABLE_LEVEL_GRID_WIDTH*WINDOW_HEIGHT*0.1 + WINDOW_HEIGHT*0.4
+        pygame.draw.rect(screen, UI_COLORS[min(math.ceil(level/STAGE_LENGTH), 9)] if (level != game.initial_level) else COLORS[-2], (x, y, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT*0.08))
+        level_text = font_small.render(f"{level:02d}", False, COLORS[-3] if (level != game.initial_level) else UI_COLORS[min(math.ceil(level/STAGE_LENGTH), 9)])
+        level_text_rect = level_text.get_rect()
+        level_text_rect.center = (x+WINDOW_HEIGHT*0.042, y+WINDOW_HEIGHT*0.045)
+        screen.blit(level_text, level_text_rect)
+        
 
 def screen_coordinates(x, y, z):
     return WINDOW_WIDTH/2+DEPTH_LEVEL*x*WINDOW_WIDTH/y, DEPTH_LEVEL*z*WINDOW_WIDTH/y
@@ -643,7 +572,7 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
         floor_coordinates = []
         for n in range(4):
             rot = n + game.visual_grid_rotation
-            x_a = (WIDTH, DEPTH)[n%2]/2*math.cos(rot*math.pi/2) + (DEPTH, WIDTH)[n%2]/2*math.sin(rot*math.pi/2)
+            x_a = (WIDTH, DEPTH)[n%2]/2*math.cos(rot*math.pi/2) + (DEPTH, WIDTH)[n%2]/2*math.sin(rot*math.pi/2) # the positions of the four corners of each of the grid's outer faces
             y_a = (DEPTH, WIDTH)[n%2]/2*math.cos(rot*math.pi/2) - (WIDTH, DEPTH)[n%2]/2*math.sin(rot*math.pi/2)+Y_CAMERA_DISTANCE
             rot += 1
             x_b = (DEPTH, WIDTH)[n%2]/2*math.cos(rot*math.pi/2) + (WIDTH, DEPTH)[n%2]/2*math.sin(rot*math.pi/2)
@@ -656,14 +585,15 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
             [screen_coordinates(*floor_coordinates[0]), screen_coordinates(*floor_coordinates[1]), screen_coordinates(*floor_coordinates[2]), screen_coordinates(*floor_coordinates[3])], width = GHOST_BORDER_WIDTH*4 if border else 0)
     # to do: fix the missing corners of the game grid's border
     for border in (False, True): # border rendering for rects is on the inside for some reason
-        pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
-        pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT*0.325, WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
+        for side in range(2): # render the UI rectangles and borders on each side of the grid
+            pygame.draw.rect(screen, COLORS[0] if border else UI_COLORS[ui_color_id], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2*(1 if side == 0 else -1) + WINDOW_HEIGHT*(0.04 if side == 0 else -0.325), WINDOW_HEIGHT*0.04, WINDOW_HEIGHT*0.285, WINDOW_HEIGHT*0.92), width = GHOST_BORDER_WIDTH*2 if border else 0)
 
-    pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, WINDOW_HEIGHT*0.58)) # level progress bar
-    level_progress = (game.plane_clear_level_progress-math.ceil((game.level-1)*(3.5+0.125*(game.level-1))))/(math.ceil((game.level)*(3.5+0.125*(game.level)))-math.ceil((game.level-1)*(3.5+0.125*(game.level-1)))) # proportion of plane clears gained towards the next level
-    pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/5, WINDOW_HEIGHT*2/25, WINDOW_HEIGHT/36, level_progress*WINDOW_HEIGHT*0.58))
-    pygame.draw.rect(screen, COLORS[9], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178, WINDOW_HEIGHT/36)) # score multiplier bar
-    pygame.draw.rect(screen, COLORS[-3], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178*game.score_mult_buffer/MULT_BUFFER_SIZE, WINDOW_HEIGHT/36))
+    level_progress = (game.plane_clear_level_progress-get_level_requirement(game.level-1))/(get_level_requirement(game.level)-get_level_requirement(game.level-1)) # proportion of plane clears gained towards the next level
+    for (color, x_from_edge, y, width, height) in [(9, WINDOW_HEIGHT/5, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT/36, WINDOW_HEIGHT*0.58), # draw each bar's full area, and then how much of it is filled - level for elements 1-2, score for elements 3-4
+        (-3, WINDOW_HEIGHT/5, WINDOW_HEIGHT*0.08, WINDOW_HEIGHT/36, level_progress*WINDOW_HEIGHT*0.58),
+        (9, WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178, WINDOW_HEIGHT/36),
+        (-3, WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.77, WINDOW_HEIGHT*0.178*game.score_mult_buffer/MULT_BUFFER_SIZE, WINDOW_HEIGHT/36)]:
+        pygame.draw.rect(screen, COLORS[color], (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+x_from_edge, y, width, height))
     score_text = font_large.render(f"{math.floor(game.score):06d}", False, COLORS[-3])
     screen.blit(score_text, (WINDOW_WIDTH/2+max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2+WINDOW_HEIGHT/16, WINDOW_HEIGHT*0.82))
     level_text = font_small.render("Level " + str(game.level), False, COLORS[-3])
@@ -674,11 +604,11 @@ def draw_game_ui(screen, game, font_small, font_large, ui_color_id):
                                      ("Piece spins:", str(game.total_spins)), ("Spin singles:", str(game.total_spin_clear_types[0])), ("Spin doubles:", str(game.total_spin_clear_types[1])), ("Spin triples:", str(game.total_spin_clear_types[2]))))):
         category_text = font_small.render(category, False, COLORS[-3])
         category_text_rect = category_text.get_rect()
-        category_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.145+0.09*position))
+        category_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.235+0.09*position))
         screen.blit(category_text, category_text_rect)
         stat_text = font_small.render(stat, False, COLORS[-2])
         stat_text_rect = stat_text.get_rect()
-        stat_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.195+0.09*position))
+        stat_text_rect.topright = (WINDOW_WIDTH/2-max(WIDTH, DEPTH)*WINDOW_HEIGHT/HEIGHT/2-WINDOW_HEIGHT/22, WINDOW_HEIGHT*(0.285+0.09*position))
         screen.blit(stat_text, stat_text_rect)
 
 def draw_pause_ui(screen, font_small):
@@ -753,11 +683,8 @@ def render_cubes(screen, cubes_to_render, rot, next_pos=0, hold_position=False):
         closest_vertex = vertex_distances.index(min(vertex_distances))
         near_vertices = [closest_vertex^1, closest_vertex^2, closest_vertex^4] # XOR with 1, 2, 4 to get the nearby vertices
         far_vertices = [closest_vertex^6, closest_vertex^5, closest_vertex^3] # XOR with 6, 5, 3 to get the vertices further away (but not polar opposites)
-        polygons_to_draw = [
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[0]]), screen_coordinates(*cube_vertices[far_vertices[2]]), screen_coordinates(*cube_vertices[near_vertices[1]])],
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[0]]), screen_coordinates(*cube_vertices[far_vertices[1]]), screen_coordinates(*cube_vertices[near_vertices[2]])],
-            [screen_coordinates(*cube_vertices[closest_vertex]), screen_coordinates(*cube_vertices[near_vertices[1]]), screen_coordinates(*cube_vertices[far_vertices[0]]), screen_coordinates(*cube_vertices[near_vertices[2]])] # big and clunky, should probably be reworked
-        ] # since there is no drawing priority here, sometimes **very** slight polygon clipping can occur, though it's practically unnoticeable so I can't be bothered to fix it - also the top always gets rendered last
+        polygons_to_draw = [[screen_coordinates(*cube_vertices[vertex]) for vertex in [closest_vertex, near_vertices[[0, 0, 1][m]], far_vertices[[2, 1, 0][m]], near_vertices[[1, 2, 2][m]]]] for m in range(3)] 
+        # since there is no drawing priority here, sometimes **very** slight polygon clipping can occur, though it's practically unnoticeable so I can't be bothered to fix it - also the top always gets rendered last
         if not RENDER_CUBES:
             pygame.draw.circle(screen, COLORS[id], screen_coordinates(x, y, z), (x**2+y**2+z**2)**0.5/3, width=5) # in case drawing cubes gets unreasonably laggy
         if RENDER_CUBES:
@@ -888,7 +815,7 @@ def controller_input_check(controller, controller_button_states, controller_anal
                     game.init_game()
                 case _:
                     if input < 4:
-                        game.change_initial_level((1, 10, -1, -10)[input])
+                        game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
             controller_button_states[input] = True
     for input, axis, dir in (0, 0, 1), (1, 1, -1), (2, 0, -1), (3, 1, 1), (4, 2, -1), (5, 2, 1), (8, 4, 1): # to do: add other controller support here. analog controls only for the first 6 inputs and the hold input currently
         if controller.get_axis(axis) * dir < ANALOG_DEADZONE_WIDTH and controller_analog_states[input]: # button release when it is currently held
@@ -913,7 +840,7 @@ def controller_input_check(controller, controller_button_states, controller_anal
                     game.init_game()
                 case _:
                     if input < 4:
-                        game.change_initial_level((1, 10, -1, -10)[input])
+                        game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
             controller_analog_states[input] = True
 
 def keyboard_input_check(event, game):
@@ -960,9 +887,39 @@ def keyboard_input_check(event, game):
                                 game.init_game()
                             case _:
                                 if input < 4:
-                                    game.change_initial_level((1, 10, -1, -10)[input])
+                                    game.change_initial_level((1, -SELECTABLE_LEVEL_GRID_WIDTH, -1, SELECTABLE_LEVEL_GRID_WIDTH)[input])
         except ValueError:
             pass
+
+def global_tick(game):
+    match game.mode:
+        case "Playing":
+            game.tick()
+        case "Paused":
+            game.ease_grid_rotation() # to prevent the grid from being stuck at an improper angle when paused
+        case "Finished":
+            game.ease_grid_rotation()
+            game.game_over_screen_tick()
+    
+def global_render(screen, game, font_small, font_large, ui_color_id):
+    match game.mode:
+        case "Playing":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_game_grid(screen, game)
+            draw_next_pieces(screen, game)
+            draw_ghost_display(screen, game)
+        case "Paused":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_pause_ui(screen, font_small)
+        case "Finished":
+            draw_game_ui(screen, game, font_small, font_large, ui_color_id)
+            draw_game_grid(screen, game)
+            draw_next_pieces(screen, game)
+            draw_ghost_display(screen, game)
+            if not game.rotate_modifier:
+                draw_finish_ui(screen, game, font_small, font_large, ui_color_id)
+        case "Home":
+            draw_home_ui(screen, game, font_small, font_large)
 
 def main():
     pygame.init()
@@ -977,55 +934,34 @@ def main():
     pygame.joystick.init()
     controller_connected = pygame.joystick.get_count() > 0
     if controller_connected:
-        controller = pygame.joystick.Joystick(0)
-        numbuttons = controller.get_numbuttons()
+        jst_controller = pygame.joystick.Joystick(0)
+        numbuttons = jst_controller.get_numbuttons()
         controller_button_states = [False for _ in range(len(controller_bindings))]
         controller_analog_states = [False for _ in range(9)] # note that indexes 6 and 7 are unused
     game = Game()
+    kb_controller = KeyboardController()
 
     while True:
         if game.mode == "Home":
-            ui_color_id = min(math.ceil(game.initial_level/4), 9)
+            ui_color_id = min(math.ceil(game.initial_level/STAGE_LENGTH), 9)
         else:
-            ui_color_id = min(math.ceil(game.level/4), 9)
+            ui_color_id = min(math.ceil(game.level/STAGE_LENGTH), 9)
         screen.fill(tuple(int(c) for c in BACKGROUND_COLORS[ui_color_id]))
 
         if controller_connected:
-            controller_input_check(controller, controller_button_states, controller_analog_states, game)
+            controller_input_check(jst_controller, controller_button_states, controller_analog_states, game)
+
+        # kb_controller.process_events() # This prevents Pygame from fetching any other keyboard inputs, so it is disabled for the time being.
 
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 sys.exit()
-            keyboard_input_check(event, game)
-                        
-        match game.mode:
-            case "Playing":
-                game.tick()
-            case "Paused":
-                game.ease_grid_rotation() # to prevent the grid from being stuck at an improper angle when paused
-            case "Finished":
-                game.ease_grid_rotation()
-                game.game_over_screen_tick()
+            keyboard_input_check(event, game) # soon to be deprecated
+        
+        global_tick(game)
 
-        match game.mode:
-            case "Playing":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_game_grid(screen, game)
-                draw_next_pieces(screen, game)
-                draw_ghost_display(screen, game)
-            case "Paused":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_pause_ui(screen, font_small)
-            case "Finished":
-                draw_game_ui(screen, game, font_small, font_large, ui_color_id)
-                draw_game_grid(screen, game)
-                draw_next_pieces(screen, game)
-                draw_ghost_display(screen, game)
-                if not game.rotate_modifier:
-                    draw_finish_ui(screen, game, font_small, font_large, ui_color_id)
-            case "Home":
-                draw_home_ui(screen, game, font_small, font_large)
+        global_render(screen, game, font_small, font_large, ui_color_id)
         
         pygame.display.update()
         if ((pygame.time.Clock.get_fps(clock) / FPS) < 0.98) and pygame.time.get_ticks() > 500:
